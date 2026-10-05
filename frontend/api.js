@@ -7,7 +7,7 @@ function getApiBase() {
     if (saved) return saved.replace(/\/+$/, '');
   } catch (e) { /* 무시 */ }
   if (location.hostname.endsWith('github.io')) {
-    return 'http://localhost:5000'; // 기본값: 로컬 백엔드
+    return 'https://ormhome-backend.onrender.com'; // 기본값: Render 배포 백엔드
   }
   return ''; // 같은 오리진
 }

@@ -1,0 +1,15 @@
+# Render Blueprint — 대시보드에서 "New + → Blueprint"로 이 repo를 선택하면 자동 배포됩니다
+services:
+  - type: web
+    name: ormhome-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: MOLIT_API_KEY
+        sync: false   # 배포 시 공공데이터포털 인증키를 직접 입력
+      - key: NODE_ENV
+        value: production

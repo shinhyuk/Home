@@ -9,12 +9,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB 연결
+// MongoDB 연결 (실패해도 서버는 동작 — 캐시는 메모리로 대체)
 const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/ormhome';
-mongoose.connect(mongoURI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).catch(err => console.error('MongoDB 연결 실패:', err));
+mongoose.connect(mongoURI, { serverSelectionTimeoutMS: 5000 })
+  .then(() => console.log('✅ MongoDB 연결됨'))
+  .catch(err => console.warn('⚠ MongoDB 미연결 (메모리 캐시로 동작):', err.message));
 
 // Routes
 app.use('/api/real-estate', require('./routes/realEstate'));

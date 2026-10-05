@@ -1,267 +1,118 @@
 # 오름홈 백엔드 API
 
-부동산 전략 분석 서비스의 백엔드 API 서버입니다.
+부동산 전략 분석 서비스 백엔드. **국토교통부 실거래가 공개시스템 6종 API 실연동 완료.**
+
+## 연동된 공공데이터 API (6종)
+
+| 유형 | 엔드포인트 키 | 국토부 서비스 |
+|------|--------------|--------------|
+| 아파트 매매 | `apt-trade` | RTMSDataSvcAptTradeDev |
+| 아파트 전월세 | `apt-rent` | RTMSDataSvcAptRent |
+| 오피스텔 매매 | `offi-trade` | RTMSDataSvcOffiTrade |
+| 오피스텔 전월세 | `offi-rent` | RTMSDataSvcOffiRent |
+| 연립다세대 매매 | `rh-trade` | RTMSDataSvcRHTrade |
+| 연립다세대 전월세 | `rh-rent` | RTMSDataSvcRHRent |
+
+모두 동일한 공공데이터포털 인증키 1개 사용 (`MOLIT_API_KEY`).
 
 ## 프로젝트 구조
 
 ```
 backend/
-├── server.js                 # 메인 서버 파일
-├── package.json
-├── .env.example             # 환경변수 예시
-├── .env                     # 실제 환경변수 (로컬만)
-│
+├── server.js                  # Express 서버 (MongoDB 없어도 동작)
+├── config/
+│   └── lawdCodes.js           # 지역명 → 법정동코드(LAWD_CD) 매핑 + 별칭("강남","판교" 등)
 ├── models/
-│   ├── User.js              # 사용자 정보 스키마
-│   └── Analysis.js          # 분석 결과 스키마
-│
+│   ├── User.js                # 사용자 입력 (TTL 30일 자동삭제)
+│   └── Analysis.js            # 분석 결과 (TTL 30일 자동삭제)
 ├── routes/
-│   ├── analysis.js          # 분석 API
-│   ├── realEstate.js        # 부동산 데이터 API
-│   └── users.js             # 사용자 정보 API
-│
+│   ├── analysis.js            # 전략 분석 / 대출 계산
+│   ├── realEstate.js          # 시세 조회 / 추세 / 사용량
+│   └── users.js               # 익명 통계
 └── services/
-    ├── analysisService.js   # 분석 로직
-    └── realEstateService.js # 부동산 데이터 처리
+    ├── molitApi.js            # 국토부 API 클라이언트 (XML 파싱, 재시도, 페이징, 사용량 추적)
+    ├── cacheService.js        # 메모리 + MongoDB 2단 캐시 (트래픽 10,000/일 보호)
+    ├── realEstateService.js   # 실거래 집계 (평균/중위/평당가, 전세가율, 월별 추세)
+    └── analysisService.js     # 전략 엔진 (DSR/LTV 대출한도, 예산비율, 전략 결정)
 ```
 
 ## 설치 및 실행
 
-### 1. 환경 설정
-
 ```bash
-# 패키지 설치
+cd backend
 npm install
-
-# .env 파일 설정
-cp .env.example .env
+cp .env.example .env   # MOLIT_API_KEY 입력
+npm start              # http://localhost:5000
 ```
 
-### 2. MongoDB 연결
+MongoDB는 선택사항: 없으면 메모리 캐시로 동작, 있으면 캐시 영속화 + 분석 결과 저장.
 
-로컬에서 테스트할 경우:
-```bash
-# MongoDB가 실행 중이어야 함
-mongod
-```
+## 핵심 API
 
-또는 MongoDB Atlas 클라우드 사용:
-```
-MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/ormhome
-```
+### POST /api/analysis/analyze — 전략 분석 (핵심 상품)
 
-### 3. 서버 실행
-
-```bash
-# 개발 모드 (자동 리로드)
-npm run dev
-
-# 프로덕션 모드
-npm start
-```
-
-서버는 `http://localhost:5000`에서 실행됩니다.
-
-## API 엔드포인트
-
-### 분석 API (`/api/analysis`)
-
-#### POST /api/analysis/analyze
-사용자 정보를 기반으로 부동산 전략 분석
-
-**요청:**
 ```json
+// 요청
 {
   "salary": "5000-7000",
   "family": "married-1child",
   "savings": "10000-20000",
   "currentHome": "jeonse",
-  "experiences": ["apt"],
   "priority": "own-home",
   "timeline": "1year",
-  "region": "서울 강남구",
-  "saveResult": true
+  "region": "강남"
 }
 ```
 
-**응답:**
-```json
-{
-  "strategy": {
-    "title": "청약 + 전세 조합 전략",
-    "description": "...",
-    "type": "apartment-lease-combo",
-    "score": 75
-  },
-  "details": {
-    "qualification": ["✓ 첫 주택 구매 자격 있음", ...],
-    "actions": ["청약 통장 개설 (미보유 시)", ...],
-    "warnings": ["• 청약 당첨까지 1~3년...", ...],
-    "risks": ["당첨 불확실성", ...]
-  },
-  "scores": {
-    "affordability": 75,
-    "readiness": 65,
-    "opportunity": 80,
-    "overall": 73
-  },
-  "regionData": {
-    "name": "서울 강남구",
-    "avgPrice": 8500,
-    "prediction": 2
-  },
-  "confidence": 85
-}
+응답에 포함되는 것:
+- `strategy` — 전략 판정 (즉시매매 / 청약+전세 / 자금축적 / 투자 / 갈아타기 등)
+- `details` — 자격·액션플랜·경고 (실데이터 기반: 전세가율 경고, 추세 경고)
+- `scores` — 구매력(실제 중위가 대비)·준비도·기회도·예산비율
+- `loanSimulation` — DSR 40% 대출한도, 월상환액, 부족자금
+- `regionData` — 실거래 통계 + 6개월 월별 추세
+- `confidence` — 거래량 기반 신뢰도
+
+### 시세 조회
+
+```
+GET /api/real-estate/regions           # 지원 지역 목록 (약 80개 시군구)
+GET /api/real-estate/price/강남         # 분석용 요약 시세
+GET /api/real-estate/summary/강남       # 종합 (아파트+오피스텔+연립, 매매+전월세)
+GET /api/real-estate/trend/강남?months=6&type=apt-trade
+GET /api/real-estate/usage             # 일일 API 호출량 (10,000 한도 모니터링)
 ```
 
-#### GET /api/analysis/loan-simulation
-대출 상환 시뮬레이션
+지역명은 유연하게 매칭: `"강남"`, `"서울 강남구"`, `"판교"`, `"분당"` 모두 인식.
 
-**파라미터:**
-- `principal`: 대출액 (만원, 필수)
-- `rate`: 연이율 (기본값: 3.5%)
-- `months`: 상환 개월 (기본값: 360개월)
+### 대출 계산
 
-**예시:**
 ```
-GET /api/analysis/loan-simulation?principal=30000&rate=3.5&months=360
+GET /api/analysis/loan-simulation?principal=44000&rate=3.5&months=360
+GET /api/analysis/loan-capacity?income=6000&housePrice=280000
 ```
 
-#### GET /api/analysis/price-trend
-지역별 가격 추세
+## 트래픽 전략 (10,000/일 한도)
 
-**파라미터:**
-- `region`: 지역명 (필수)
-- `months`: 조회 개월 수 (기본값: 12)
+- (유형 × 지역 × 월) 단위 캐싱 — 같은 지역 재조회는 API 호출 0회
+- 최근 2개월: 6시간 캐시 (신고 지연 반영) / 과거 월: 7일 캐시
+- 신규 지역 1곳 최초 분석 ≈ 12콜 → 캐시 후 0콜
+- 실측: 강남구 첫 분석 20콜, 이후 분석 0.025초/0콜
 
-#### GET /api/analysis/region-info
-지역 상세 정보
+## 검증된 실측 결과 (2026-10 기준)
 
-**파라미터:**
-- `region`: 지역명 (필수)
-
-#### GET /api/analysis/stats
-분석 통계 (대시보드용)
-
-### 부동산 API (`/api/real-estate`)
-
-#### GET /api/real-estate/regions
-지원하는 지역 목록
-
-#### GET /api/real-estate/price/:region
-지역 평균 가격 정보
-
-#### GET /api/real-estate/apartments/:region
-지역의 청약 정보
-
-#### GET /api/real-estate/trend/:region
-지역의 가격 추세
-
-**파라미터:**
-- `months`: 조회 개월 (기본값: 12)
-
-### 사용자 API (`/api/users`)
-
-#### POST /api/users
-사용자 정보 저장
-
-#### GET /api/users/stats
-익명 통계
-
-## 환경변수 설정
-
-```env
-# 서버
-PORT=5000
-NODE_ENV=development
-
-# MongoDB
-MONGODB_URI=mongodb://localhost:27017/ormhome
-
-# API 키 (추후 설정)
-MOLIT_API_KEY=
-PUBLIC_DATA_API_KEY=
-
-# CORS
-CORS_ORIGIN=http://localhost:3000
-```
-
-## 다음 단계
-
-### Phase 2 (우선순위 높음)
-- [ ] 국토교통부 실거래가 API 연동
-- [ ] 실시간 시세 데이터 캐싱
-- [ ] 지역별 예측 알고리즘 개선
-
-### Phase 3
-- [ ] 청약 정보 API 연동
-- [ ] 세금 계산 로직 고도화
-- [ ] 인증 시스템 (JWT)
-
-### Phase 4
-- [ ] 고급 분석 (비교, 시뮬레이션)
-- [ ] 캐싱 최적화 (Redis)
-- [ ] API 문서 자동화 (Swagger)
-
-## 기술 스택
-
-- **Runtime**: Node.js
-- **Framework**: Express.js
-- **Database**: MongoDB + Mongoose
-- **HTTP Client**: Axios
-- **Middleware**: CORS, dotenv
+서울 강남구: 평균 29.0억 / 중위 28.0억 / 평당 1.14억 / 전세가율 36% / 6개월 +2.7% 상승
 
 ## 주의사항
 
-### 개인정보 보호
-- 사용자 데이터는 30일 후 자동 삭제됨 (TTL 인덱스)
-- IP와 User-Agent는 분석 용도로만 저장
-- 개인식별 정보는 저장하지 않음
+- `.env`의 인증키는 커밋 금지 (`.gitignore` 처리됨)
+- 공공망 특성상 간헐적 연결 끊김 → 지수 백오프 재시도 4회 내장
+- 출처 표시 의무: "국토교통부 실거래가 공개시스템" (응답에 `dataSource` 포함)
+- 사용자 데이터 30일 TTL 자동삭제 (개인정보 보호)
 
-### 데이터 정확성
-- 현재는 샘플 데이터 사용 중
-- 실제 API 연동 시 정확도 증가
-- 예측값은 참고용이며 실제 상황은 다를 수 있음
+## 다음 단계
 
-## 개발 시 유용한 명령어
-
-```bash
-# 개발 서버 (nodemon)
-npm run dev
-
-# 프로덕션 시뮬레이션
-npm start
-
-# MongoDB 로컬 테스트
-mongo test_ormhome
-
-# API 테스트 (curl)
-curl http://localhost:5000/health
-curl -X POST http://localhost:5000/api/analysis/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"salary":"5000-7000","family":"married","priority":"own-home"}'
-```
-
-## 문제 해결
-
-### MongoDB 연결 실패
-```bash
-# MongoDB 서비스 시작 (Mac)
-brew services start mongodb-community
-
-# MongoDB 서비스 시작 (Linux)
-sudo systemctl start mongod
-```
-
-### 포트 이미 사용 중
-```bash
-# 포트 변경
-PORT=5001 npm run dev
-
-# 포트 프로세스 확인
-lsof -i :5000
-```
-
-## 라이센스
-
-MIT
+- [ ] 프론트엔드 연결 (프로토타입 → 실 API 호출)
+- [ ] 청약홈 분양정보 API 추가
+- [ ] 취득세·양도세 계산기
+- [ ] 지역 비교 (2~3개 지역 나란히)
+- [ ] 배포 (Railway/Render + MongoDB Atlas)

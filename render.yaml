@@ -4,7 +4,8 @@ services:
     name: ormhome-backend
     runtime: node
     plan: free
-    region: singapore  # 국토부 API가 미국 IP를 403 차단 → 아시아 리전 사용
+    # region 미지정: 기존 서비스 리전 유지 (리전 변경은 Blueprint 동기화 불가)
+    # 국토부 데이터는 GitHub Actions가 수집하므로 서버 리전 무관
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start

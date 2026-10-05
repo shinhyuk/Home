@@ -234,10 +234,72 @@ async function getRegionData(regionInput) {
   };
 }
 
+// ───────────────────────── 단지별 집계 (최근 6개월 아파트 매매) ─────────────────────────
+
+async function getComplexStats(regionInput) {
+  const region = resolveLawdCode(regionInput);
+  if (!region) return null;
+
+  const months = recentMonths(6);
+  const items = await collectMonths('apt-trade', region.code, months);
+  const valid = items.filter((i) => !i.cancelled && i.dealAmount > 0 && i.name);
+
+  const groups = new Map();
+  for (const i of valid) {
+    const key = `${i.name}|${i.dong}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  }
+
+  const complexes = [];
+  for (const [key, list] of groups) {
+    if (list.length < 3) continue; // 표본 3건 미만 제외
+    const [name, dong] = key.split('|');
+    const amounts = list.map((i) => i.dealAmount).sort((a, b) => a - b);
+    const withArea = list.filter((i) => i.area > 0);
+    const perP = withArea.map((i) => i.dealAmount / (i.area / PYEONG));
+    const areas = withArea.map((i) => i.area).sort((a, b) => a - b);
+    complexes.push({
+      name, dong,
+      count: list.length,
+      medianPrice: median(amounts),
+      minPrice: amounts[0],
+      maxPrice: amounts[amounts.length - 1],
+      avgPerPyeong: perP.length ? Math.round(perP.reduce((a, b) => a + b, 0) / perP.length) : null,
+      areaRange: areas.length ? [Math.round(areas[0]), Math.round(areas[areas.length - 1])] : null,
+      buildYear: list.find((i) => i.buildYear)?.buildYear || null,
+    });
+  }
+
+  complexes.sort((a, b) => b.count - a.count);
+  return { region: region.name, complexes };
+}
+
+// ───────────────────────── 전국 지역 요약 (수집기가 생성한 summary.json) ─────────────────────────
+
+async function getAllRegionSummaries() {
+  const key = 'static:summary';
+  const cached = await cache.get(key);
+  if (cached) return cached;
+  try {
+    const res = await axios.get(`${STATIC_DATA_BASE}/summary.json`, { timeout: 10000 });
+    const data = res.data;
+    if (data && Array.isArray(data.regions)) {
+      await cache.set(key, data, 6 * 60 * 60 * 1000);
+      return data;
+    }
+  } catch (e) {
+    console.warn('summary.json 조회 실패:', e.message);
+  }
+  return null;
+}
+
 module.exports = {
   getRegionSummary,
   getPriceTrend,
   getRegionData,
+  getComplexStats,
+  getAllRegionSummaries,
   fetchMonthCached,
   listRegions,
 };

@@ -419,6 +419,58 @@ function buildTracks(userData, norm, regionData, scores) {
   return { buy, jeonse, subscription };
 }
 
+// ───────────────────────── 추천: 단지 + 지역 ─────────────────────────
+
+async function buildRecommendations(userData, norm, regionData, buyTrack) {
+  const budget = buyTrack?.budget || (norm.capital + norm.jeonseDeposit);
+  const result = { budget, complexes: null, regions: null };
+
+  // 1) 목표 지역 내 단지 추천 (최근 6개월 실거래)
+  try {
+    const stats = await realEstateService.getComplexStats(userData.region);
+    if (stats && stats.complexes.length) {
+      const within = stats.complexes
+        .filter((c) => c.medianPrice && c.medianPrice <= budget)
+        .slice(0, 6);
+      const stretch = stats.complexes
+        .filter((c) => c.medianPrice > budget && c.medianPrice <= budget * 1.3)
+        .map((c) => ({ ...c, shortfall: c.medianPrice - budget }))
+        .sort((a, b) => a.shortfall - b.shortfall)
+        .slice(0, 4);
+      result.complexes = { regionName: stats.region, within, stretch, basis: '최근 6개월 실거래, 3건 이상 단지' };
+    }
+  } catch (e) {
+    console.warn('단지 추천 실패:', e.message);
+  }
+
+  // 2) 전국 지역 추천 (예산으로 진입 가능한 지역)
+  try {
+    const summary = await realEstateService.getAllRegionSummaries();
+    if (summary) {
+      const scored = summary.regions
+        .filter((r) => r.medianPrice && r.tradeCount >= 10)
+        .map((r) => {
+          // 지역별 예산: 자금 + min(DSR한도, 해당 지역 중위가의 LTV 70%)
+          const loan = maxLoanCapacity(norm.annualIncome, r.medianPrice);
+          const regionBudget = norm.capital + norm.jeonseDeposit + loan;
+          return { ...r, fit: Math.round((regionBudget / r.medianPrice) * 100) };
+        })
+        .filter((r) => r.fit >= 90)
+        .sort((a, b) => (b.changeRate ?? -99) - (a.changeRate ?? -99));
+
+      result.regions = {
+        affordable: scored.slice(0, 8),
+        totalScanned: summary.regions.length,
+        generatedAt: summary.generatedAt,
+      };
+    }
+  } catch (e) {
+    console.warn('지역 추천 실패:', e.message);
+  }
+
+  return result;
+}
+
 // ───────────────────────── 메인 분석 ─────────────────────────
 
 async function analyzeStrategy(userData) {
@@ -430,6 +482,7 @@ async function analyzeStrategy(userData) {
   const norm = normalizeInput(userData);
   const scores = calculateScores(userData, regionData);
   const tracks = buildTracks(userData, norm, regionData, scores);
+  const recommendations = await buildRecommendations(userData, norm, regionData, tracks.buy);
   const strategy = determineStrategy({ scores, priority: userData.priority, currentHome: userData.currentHome, regionData });
   strategy.score = scores.overall;
 
@@ -455,6 +508,7 @@ async function analyzeStrategy(userData) {
   return {
     strategy,
     tracks,
+    recommendations,
     details,
     scores: {
       affordability: scores.affordability,

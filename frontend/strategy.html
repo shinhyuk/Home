@@ -5,17 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>오름홈 — 전략 분석 결과</title>
 <link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="container">
-  <div class="logo"><a href="index.html">오름홈</a></div>
-  <div class="tagline">전략 분석 결과</div>
+  <div class="page-head">
+    <div class="site-head">
+      <div class="logo"><a href="index.html">오름<span>홈</span></a></div>
+      <div class="tagline">국토교통부 실거래 기반 맞춤 전략</div>
+    </div>
+  </div>
 
   <div id="loading">
     <div class="spinner"></div>
-    <p>국토교통부 실거래 데이터를 분석 중입니다…</p>
-    <p class="muted">처음 조회하는 지역은 최대 1~2분 걸릴 수 있습니다 (서버가 잠들어 있었다면 깨어나는 데 1분 추가)</p>
+    <p>실거래 데이터를 분석 중입니다…</p>
+    <p class="muted">서버가 쉬고 있었다면 깨어나는 데 최대 1분이 걸릴 수 있습니다</p>
   </div>
 
   <div id="error" hidden>
@@ -23,54 +29,76 @@
     <a class="btn btn-ghost" href="index.html">← 입력으로 돌아가기</a>
   </div>
 
-  <div id="result" hidden>
-    <!-- 종합 전략 -->
-    <div class="card strategy-main">
+  <div id="result" class="layout" hidden>
+    <!-- 종합 전략 히어로 -->
+    <div class="card hero span-all">
       <div class="label">종합 추천 전략</div>
       <h2 id="stTitle"></h2>
       <p id="stDesc"></p>
+      <div class="hero-stats" id="heroStats"></div>
     </div>
 
-    <!-- 트랙 비교: 청약 / 전세 / 매매 -->
-    <div class="card">
-      <h2>경로별 비교</h2>
-      <div id="tracksBox"></div>
+    <!-- 메인 컬럼 -->
+    <div class="col-main">
+      <!-- 단지 추천 -->
+      <div class="card" id="complexCard" hidden>
+        <h2>🏢 예산으로 노려볼 단지 <span class="sub" id="complexBasis"></span></h2>
+        <div id="complexWithin"></div>
+        <div id="complexStretch"></div>
+      </div>
+
+      <!-- 지역 추천 -->
+      <div class="card" id="regionRecCard" hidden>
+        <h2>📍 예산에 맞는 다른 지역 <span class="sub" id="regionRecSub"></span></h2>
+        <div class="table-wrap"><table id="regionRecTable"></table></div>
+        <p class="muted" style="margin-top:10px">예산충족률 = 내 최대예산 ÷ 그 지역 중위 매매가 · 6개월 변화율 높은 순</p>
+      </div>
+
+      <!-- 트랙 비교 -->
+      <div class="card">
+        <h2>🧭 경로별 비교 — 청약 · 전세 · 매매</h2>
+        <div id="tracksBox"></div>
+      </div>
+
+      <!-- 지역 시세 -->
+      <div class="card">
+        <h2 id="regionTitle">지역 시세</h2>
+        <div id="regionBox"></div>
+        <h3 style="margin-top:18px">월별 실거래 추세 <span class="muted">(아파트 매매)</span></h3>
+        <div class="table-wrap"><table id="trendTable"></table></div>
+        <p class="muted" id="sourceNote" style="margin-top:10px"></p>
+      </div>
     </div>
 
-    <!-- 지역 시세 -->
-    <div class="card">
-      <h2 id="regionTitle">지역 시세</h2>
-      <div id="regionBox"></div>
-      <h3 style="margin-top:16px">월별 실거래 추세 (아파트 매매)</h3>
-      <div class="table-wrap"><table id="trendTable"></table></div>
-      <p class="muted" id="sourceNote"></p>
-    </div>
+    <!-- 사이드 컬럼 -->
+    <div class="col-side">
+      <!-- 내 예산 -->
+      <div class="card" id="loanCard" hidden>
+        <h2>💰 내 예산 분해 <span class="sub">DSR 40% · 30년 · 연 3.5%</span></h2>
+        <div id="loanBox"></div>
+      </div>
 
-    <!-- 대출 -->
-    <div class="card" id="loanCard" hidden>
-      <h2>대출 시뮬레이션 <span class="hint" style="font-weight:400;font-size:12px">DSR 40% · 30년 원리금균등 · 연 3.5%</span></h2>
-      <div id="loanBox"></div>
-    </div>
+      <div class="card">
+        <h2>✅ 자격 · 현황</h2>
+        <ul id="qualList"></ul>
+      </div>
+      <div class="card">
+        <h2>🗺 액션 플랜</h2>
+        <ul id="actionList"></ul>
+      </div>
+      <div class="card">
+        <h2>⚠️ 주의사항</h2>
+        <ul id="warnList" class="warn-text"></ul>
+      </div>
 
-    <!-- 자격 / 액션 / 경고 -->
-    <div class="card">
-      <h2>자격 · 현황</h2>
-      <ul id="qualList"></ul>
+      <a class="btn btn-ghost" href="index.html">← 정보 수정하고 다시 분석</a>
     </div>
-    <div class="card">
-      <h2>액션 플랜</h2>
-      <ul id="actionList"></ul>
-    </div>
-    <div class="card">
-      <h2>주의사항</h2>
-      <ul id="warnList" class="warn"></ul>
-    </div>
-
-    <a class="btn btn-ghost" href="index.html">← 정보 수정하고 다시 분석</a>
   </div>
 
   <div id="apiConfig"></div>
-  <div class="footer">출처: 국토교통부 실거래가 공개시스템 · 본 분석은 참고용이며 투자 권유가 아닙니다</div>
+  <div class="footer">
+    데이터: 국토교통부 실거래가 공개시스템 (매일 자동 갱신) · 본 분석은 참고용이며 투자 권유가 아닙니다
+  </div>
 </div>
 
 <script src="api.js"></script>
@@ -83,25 +111,28 @@ const FEASIBLE_LABEL = {
 function trackCard(t, extraHtml) {
   const cls = t.feasible || 'unknown';
   return `
-    <div class="card track ${cls}" style="margin-bottom:12px">
+    <div class="card track ${cls}" style="margin:0 0 12px; box-shadow:none">
       <h3>${t.name} <span class="badge ${cls}">${FEASIBLE_LABEL[cls] || cls}</span></h3>
       ${extraHtml}
-      <p style="font-size:13px;margin:8px 0 0">${t.note || ''}</p>
-      ${t.warning ? `<p class="warn">⚠ ${t.warning}</p>` : ''}
+      <p style="font-size:13px;margin:10px 0 0;color:var(--sub)">${t.note || ''}</p>
+      ${t.warning ? `<p class="warn-text" style="font-size:13px">⚠ ${t.warning}</p>` : ''}
     </div>`;
 }
 
-function kv(label, value) {
-  return `<div class="kv"><span>${label}</span><b>${value}</b></div>`;
+function kv(label, value, big) {
+  return `<div class="kv"><span>${label}</span><b class="${big ? 'big' : ''}">${value}</b></div>`;
+}
+
+function areaToPyeong(range) {
+  if (!range) return '-';
+  const p = (m2) => Math.round(m2 / 3.3058);
+  return p(range[0]) === p(range[1]) ? `${p(range[0])}평형` : `${p(range[0])}~${p(range[1])}평형`;
 }
 
 async function run() {
   let input;
   try { input = JSON.parse(localStorage.getItem('ormhome_input') || 'null'); } catch (e) { input = null; }
-  if (!input) {
-    location.replace('index.html');
-    return;
-  }
+  if (!input) { location.replace('index.html'); return; }
 
   try {
     const r = await apiFetch('/api/analysis/analyze', {
@@ -114,111 +145,167 @@ async function run() {
     document.getElementById('loading').hidden = true;
     document.getElementById('error').hidden = false;
     document.getElementById('errorMsg').textContent =
-      '분석 실패: ' + err.message + ' — 백엔드 서버가 실행 중인지, 하단 ⚙ API 설정이 맞는지 확인하세요.';
+      '분석 실패: ' + err.message + ' — 잠시 후 새로고침하거나, 하단 ⚙ API 설정을 확인하세요.';
   }
 }
 
 function render(r) {
   document.getElementById('loading').hidden = true;
 
-  // 지역 미인식 → 결과 대신 재입력 안내
-  const rdCheck = r.regionData || {};
-  if (rdCheck.error || (!rdCheck.avgPrice && !rdCheck.tradeCount)) {
+  const rd = r.regionData || {};
+  if (rd.error || (!rd.avgPrice && !rd.tradeCount)) {
     document.getElementById('error').hidden = false;
     document.getElementById('errorMsg').innerHTML =
-      '입력하신 지역을 인식하지 못해 시세 분석을 할 수 없습니다.<br>' +
-      '<b>동네/역 이름</b>(예: 강남, 여의도, 잠실, 판교, 홍대) 또는 ' +
-      '<b>시군구</b>(예: 서울 마포구)로 다시 입력해주세요.';
+      '입력하신 지역을 인식하지 못했습니다.<br><b>동네/역 이름</b>(강남, 여의도, 잠실, 판교, 홍대…) 또는 <b>시군구</b>(서울 마포구)로 다시 입력해주세요.';
     return;
   }
 
   document.getElementById('result').hidden = false;
 
-  // 종합 전략
+  // ── 히어로 ──
   document.getElementById('stTitle').textContent = r.strategy.title;
   document.getElementById('stDesc').textContent = r.strategy.description;
+  const l = r.loanSimulation;
+  const heroStats = [];
+  if (l) {
+    heroStats.push({ k: '내 최대 예산', v: fmtMoney(l.ownCapital + l.maxLoanByDSR) });
+    heroStats.push({ k: '가능 대출', v: fmtMoney(l.maxLoanByDSR) });
+    heroStats.push({ k: '월 상환 (권장대출 시)', v: fmtMoney(l.monthlyPayment) });
+  }
+  heroStats.push({ k: `${rd.name} 중위가`, v: fmtMoney(rd.medianPrice) });
+  document.getElementById('heroStats').innerHTML =
+    heroStats.map((s) => `<div class="hs"><div class="v">${s.v}</div><div class="k">${s.k}</div></div>`).join('');
 
-  // 트랙 비교
+  // ── 단지 추천 ──
+  const rec = r.recommendations || {};
+  const cx = rec.complexes;
+  if (cx && (cx.within?.length || cx.stretch?.length)) {
+    document.getElementById('complexCard').hidden = false;
+    document.getElementById('complexBasis').textContent = `${cx.regionName} · ${cx.basis}`;
+
+    const rowOf = (c, extra) => `
+      <tr>
+        <td><b>${c.name}</b><span class="minor">${c.dong} · ${c.buildYear ? c.buildYear + '년' : ''} · ${areaToPyeong(c.areaRange)}</span></td>
+        <td>${c.count}건</td>
+        <td><b>${fmtMoney(c.medianPrice)}</b><span class="minor">${fmtMoney(c.minPrice)}~${fmtMoney(c.maxPrice)}</span></td>
+        <td>${fmtMoney(c.avgPerPyeong)}</td>
+        ${extra !== undefined ? `<td class="warn-text">+${fmtMoney(extra)}</td>` : ''}
+      </tr>`;
+
+    let html = '';
+    if (cx.within?.length) {
+      html += `<p style="font-size:13px;margin:0 0 6px"><b style="color:var(--good)">지금 예산(${fmtMoney(rec.budget)}) 안에서</b></p>
+        <div class="table-wrap"><table>
+        <tr><th>단지</th><th>거래</th><th>중위가 (범위)</th><th>평당가</th></tr>
+        ${cx.within.map((c) => rowOf(c)).join('')}</table></div>`;
+    } else {
+      html += `<p class="muted">현재 예산 안에 드는 단지가 이 지역엔 없습니다. 아래 "다른 지역"을 참고하세요.</p>`;
+    }
+    if (cx.stretch?.length) {
+      html += `<p style="font-size:13px;margin:16px 0 6px"><b style="color:var(--warn)">조금 더 모으면 (예산 +30% 이내)</b></p>
+        <div class="table-wrap"><table>
+        <tr><th>단지</th><th>거래</th><th>중위가 (범위)</th><th>평당가</th><th>부족분</th></tr>
+        ${cx.stretch.map((c) => rowOf(c, c.shortfall)).join('')}</table></div>`;
+    }
+    document.getElementById('complexWithin').innerHTML = html;
+  }
+
+  // ── 지역 추천 ──
+  const rg = rec.regions;
+  if (rg && rg.affordable?.length) {
+    document.getElementById('regionRecCard').hidden = false;
+    document.getElementById('regionRecSub').textContent = `전국 ${rg.totalScanned}개 시군구 스캔`;
+    document.getElementById('regionRecTable').innerHTML =
+      '<tr><th>지역</th><th>중위가</th><th>평당가</th><th>전세가율</th><th>6개월</th><th>예산충족률</th></tr>' +
+      rg.affordable.map((x) => {
+        const trendCls = x.changeRate > 1 ? 'up' : x.changeRate < -1 ? 'down' : '';
+        const fitCls = x.fit >= 120 ? 'style="color:var(--good);font-weight:700"' : x.fit >= 100 ? 'style="font-weight:700"' : 'style="color:var(--warn)"';
+        return `<tr>
+          <td><b>${x.name}</b></td>
+          <td>${fmtMoney(x.medianPrice)}</td>
+          <td>${fmtMoney(x.avgPerPyeong)}</td>
+          <td>${x.jeonseRatio ?? '-'}%</td>
+          <td class="${trendCls}">${x.changeRate > 0 ? '+' : ''}${x.changeRate ?? '-'}%</td>
+          <td ${fitCls}>${x.fit}%</td>
+        </tr>`;
+      }).join('');
+  }
+
+  // ── 트랙 ──
   const t = r.tracks || {};
   let html = '';
-
   if (t.subscription) {
     const s = t.subscription.score || {};
     let scoreHtml = '';
     if (s.total !== null && s.total !== undefined) {
-      scoreHtml = kv('청약 가점 (84점 만점)', `<span style="font-size:17px">${s.total}점</span>`)
-        + kv('└ 무주택 기간', `${s.homelessPoints ?? '-'}점 / 32`)
-        + kv('└ 부양가족', `${s.familyPoints ?? '-'}점 / 35`)
-        + kv('└ 통장 가입기간', `${s.accountPoints ?? '-'}점 / 17`);
+      scoreHtml = kv('청약 가점 (84점 만점)', `${s.total}점`, true)
+        + kv('└ 무주택 기간', `${s.homelessPoints ?? '-'} / 32`)
+        + kv('└ 부양가족', `${s.familyPoints ?? '-'} / 35`)
+        + kv('└ 통장 가입기간', `${s.accountPoints ?? '-'} / 17`);
     } else if (t.subscription.eligible) {
-      scoreHtml = kv('부양가족 가점', `${s.familyPoints ?? '-'}점 / 35`)
+      scoreHtml = kv('부양가족 가점', `${s.familyPoints ?? '-'} / 35`)
         + `<p class="muted">무주택 기간·통장 가입기간 입력 시 전체 가점 계산</p>`;
     }
-    if (t.subscription.specialSupply && t.subscription.specialSupply.length) {
-      scoreHtml += `<p style="font-size:13px;margin:8px 0 0"><b>검토 가능한 특별공급:</b> ${t.subscription.specialSupply.join(', ')}</p>`;
+    if (t.subscription.specialSupply?.length) {
+      scoreHtml += `<p style="font-size:13px;margin:10px 0 0"><b>검토 가능 특별공급:</b> ${t.subscription.specialSupply.join(', ')}</p>`;
     }
     html += trackCard(t.subscription, scoreHtml);
   }
-
   if (t.jeonse && t.jeonse.feasible) {
     html += trackCard(t.jeonse,
       kv('지역 평균 전세보증금', fmtMoney(t.jeonse.avgDeposit))
       + kv('내 전세 예산 (자금+전세대출)', fmtMoney(t.jeonse.budget))
       + kv('필요 전세대출', fmtMoney(t.jeonse.loanNeeded))
-      + kv('월 이자 부담 (연 3.8%)', fmtMoney(t.jeonse.monthlyInterest))
+      + kv('월 이자 (연 3.8%)', fmtMoney(t.jeonse.monthlyInterest))
       + kv('전세가율', (t.jeonse.jeonseRatio ?? '-') + '%'));
   }
-
   if (t.buy && t.buy.feasible) {
     html += trackCard(t.buy,
       kv('지역 중위 매매가', fmtMoney(t.buy.medianPrice))
       + kv('내 최대 예산 (자금+대출)', fmtMoney(t.buy.budget))
-      + kv('예산 충족률', t.buy.budgetRatio + '%')
-      + kv('월 상환액 (필요 대출 기준)', fmtMoney(t.buy.monthlyPayment))
+      + kv('예산 충족률', t.buy.budgetRatio + '%', true)
+      + kv('월 상환액', fmtMoney(t.buy.monthlyPayment))
       + (t.buy.shortfall > 0 ? kv('부족 자금', fmtMoney(t.buy.shortfall)) : ''));
   }
+  document.getElementById('tracksBox').innerHTML = html || '<p class="muted">시세 데이터 부족</p>';
 
-  document.getElementById('tracksBox').innerHTML = html || '<p class="muted">시세 데이터 부족으로 비교 불가</p>';
-
-  // 지역 시세
-  const rd = r.regionData || {};
-  document.getElementById('regionTitle').textContent = `${rd.name || ''} 시세 (최근 2개월 실거래)`;
-  const trendClass = rd.trend === 'up' ? 'up' : rd.trend === 'down' ? 'down' : '';
+  // ── 시세 ──
+  document.getElementById('regionTitle').textContent = `📈 ${rd.name} 시세 (최근 2개월 실거래)`;
+  const trendCls = rd.trend === 'up' ? 'up' : rd.trend === 'down' ? 'down' : '';
   const trendLabel = rd.trend === 'up' ? `상승 +${rd.changeRate}%` : rd.trend === 'down' ? `하락 ${rd.changeRate}%` : rd.trend === 'stable' ? '보합' : '-';
   document.getElementById('regionBox').innerHTML =
     kv('아파트 평균 매매가', fmtMoney(rd.avgPrice))
-    + kv('중위 매매가', fmtMoney(rd.medianPrice))
+    + kv('중위 매매가', fmtMoney(rd.medianPrice), true)
     + kv('평당가', fmtMoney(rd.avgPerPyeong))
     + kv('평균 전세보증금', fmtMoney(rd.jeonseAvgDeposit))
     + kv('전세가율', (rd.jeonseRatio ?? '-') + '%')
-    + kv('6개월 추세', `<span class="${trendClass}">${trendLabel}</span>`)
+    + kv('6개월 추세', `<span class="${trendCls}">${trendLabel}</span>`)
     + kv('표본 거래량', (rd.tradeCount ?? 0) + '건');
 
-  // 월별 추세 테이블
-  const rows = (rd.monthlyTrend || []).map((m) =>
-    `<tr><td>${m.month}</td><td>${m.count ?? 0}건</td><td>${fmtMoney(m.avgAmount)}</td><td>${fmtMoney(m.medianAmount)}</td><td>${fmtMoney(m.avgPerPyeong)}</td></tr>`
-  ).join('');
   document.getElementById('trendTable').innerHTML =
-    '<tr><th>월</th><th>거래량</th><th>평균가</th><th>중위가</th><th>평당가</th></tr>' + rows;
+    '<tr><th>월</th><th>거래량</th><th>평균가</th><th>중위가</th><th>평당가</th></tr>' +
+    (rd.monthlyTrend || []).map((m) =>
+      `<tr><td>${m.month}</td><td>${m.count ?? 0}건</td><td>${fmtMoney(m.avgAmount)}</td><td>${fmtMoney(m.medianAmount)}</td><td>${fmtMoney(m.avgPerPyeong)}</td></tr>`
+    ).join('');
 
   document.getElementById('sourceNote').textContent =
     `신뢰도 ${r.confidence}% (거래량 기반) · 데이터: 국토교통부 실거래가 공개시스템`;
 
-  // 대출
-  if (r.loanSimulation) {
-    const l = r.loanSimulation;
+  // ── 예산 분해 ──
+  if (l) {
     document.getElementById('loanCard').hidden = false;
     document.getElementById('loanBox').innerHTML =
-      kv('기준 주택가격 (지역 중위가)', fmtMoney(l.housePrice))
-      + kv('보유 자금', fmtMoney(l.ownCapital))
+      kv('보유 자금 (전세금 회수 포함)', fmtMoney(l.ownCapital))
       + kv('DSR 기준 최대 대출', fmtMoney(l.maxLoanByDSR))
+      + kv('= 내 최대 예산', fmtMoney(l.ownCapital + l.maxLoanByDSR), true)
+      + kv('기준 주택가 (지역 중위)', fmtMoney(l.housePrice))
       + kv('권장 대출액', fmtMoney(l.recommendedLoan))
       + kv('월 상환액', fmtMoney(l.monthlyPayment))
       + kv('총 이자 (30년)', fmtMoney(l.totalInterest))
-      + (l.shortfall > 0 ? kv('대출 후에도 부족한 금액', `<span class="warn">${fmtMoney(l.shortfall)}</span>`) : '');
+      + (l.shortfall > 0 ? kv('대출 후 부족분', `<span class="warn-text">${fmtMoney(l.shortfall)}</span>`) : '');
   }
 
-  // 리스트
+  // ── 리스트 ──
   const d = r.details || {};
   document.getElementById('qualList').innerHTML = (d.qualification || []).map((x) => `<li>${x}</li>`).join('');
   document.getElementById('actionList').innerHTML = (d.actions || []).map((x) => `<li>${x}</li>`).join('');

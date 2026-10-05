@@ -3,15 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="국토교통부 실거래 데이터 기반 맞춤형 부동산 전략 분석 — 청약·전세·매매 비교">
+<meta name="description" content="국토교통부 실거래 데이터 기반 맞춤형 부동산 전략 분석 — 청약·전세·매매 비교, 단지·지역 추천">
 <title>오름홈 — 내 정보 입력</title>
 <link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="container">
-  <div class="logo"><a href="index.html">오름홈</a></div>
-  <div class="tagline">국토교통부 실거래 데이터로 당신의 부동산 전략을 한 번에</div>
+<div class="container narrow">
+  <div class="page-head">
+    <div class="site-head">
+      <div class="logo"><a href="index.html">오름<span>홈</span></a></div>
+      <div class="tagline">실거래 데이터로 청약·전세·매매 전략을 한 번에</div>
+    </div>
+  </div>
 
   <form id="infoForm">
     <div class="card">
@@ -22,27 +28,32 @@
       <label>가용 자금 (만원) <span class="hint">예금·주식 등 동원 가능한 돈</span></label>
       <input type="number" name="savingsAmount" min="0" step="100" placeholder="예: 15000" required>
 
-      <label>현재 전세/월세 보증금 (만원) <span class="hint">이사 시 회수 가능한 금액, 없으면 0</span></label>
+      <label>현재 전세/월세 보증금 (만원) <span class="hint">이사 시 회수 가능 금액, 없으면 0</span></label>
       <input type="number" name="jeonseDeposit" min="0" step="100" value="0">
     </div>
 
     <div class="card">
       <h2>2. 가족</h2>
-      <label>혼인 상태</label>
-      <select name="maritalStatus" id="maritalStatus" required>
-        <option value="">선택하세요</option>
-        <option value="single">미혼</option>
-        <option value="married">기혼</option>
-      </select>
-
-      <label>자녀 수</label>
-      <select name="childrenCount">
-        <option value="0">없음</option>
-        <option value="1">1명</option>
-        <option value="2">2명</option>
-        <option value="3">3명</option>
-        <option value="4">4명 이상</option>
-      </select>
+      <div class="row">
+        <div>
+          <label>혼인 상태</label>
+          <select name="maritalStatus" id="maritalStatus" required>
+            <option value="">선택하세요</option>
+            <option value="single">미혼</option>
+            <option value="married">기혼</option>
+          </select>
+        </div>
+        <div>
+          <label>자녀 수</label>
+          <select name="childrenCount">
+            <option value="0">없음</option>
+            <option value="1">1명</option>
+            <option value="2">2명</option>
+            <option value="3">3명</option>
+            <option value="4">4명 이상</option>
+          </select>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -50,7 +61,7 @@
       <label>현재 주택 보유 상태</label>
       <select name="currentHome" required>
         <option value="">선택하세요</option>
-        <option value="none">무주택 (자가 아님, 월세·본가 등)</option>
+        <option value="none">무주택 (월세·본가 등)</option>
         <option value="jeonse">무주택 (전세 거주)</option>
         <option value="first-time">1주택 (생애 첫 주택)</option>
         <option value="owned">1주택</option>
@@ -72,26 +83,31 @@
 
     <div class="card">
       <h2>4. 목표</h2>
-      <label>우선순위</label>
-      <select name="priority" required>
-        <option value="">선택하세요</option>
-        <option value="own-home">내 집 마련이 최우선</option>
-        <option value="investment">자산 증식 / 투자</option>
-        <option value="upgrade">현재 집 갈아타기</option>
-        <option value="flexible">유연하게 (전세·매매 비교)</option>
-      </select>
+      <div class="row">
+        <div>
+          <label>우선순위</label>
+          <select name="priority" required>
+            <option value="">선택하세요</option>
+            <option value="own-home">내 집 마련이 최우선</option>
+            <option value="investment">자산 증식 / 투자</option>
+            <option value="upgrade">현재 집 갈아타기</option>
+            <option value="flexible">유연하게 (전세·매매 비교)</option>
+          </select>
+        </div>
+        <div>
+          <label>목표 시기</label>
+          <select name="timeline" required>
+            <option value="">선택하세요</option>
+            <option value="urgent">6개월 내</option>
+            <option value="1year">1년 내</option>
+            <option value="2year">2년 내</option>
+            <option value="3plus">3년 이상</option>
+          </select>
+        </div>
+      </div>
 
-      <label>목표 시기</label>
-      <select name="timeline" required>
-        <option value="">선택하세요</option>
-        <option value="urgent">6개월 내</option>
-        <option value="1year">1년 내</option>
-        <option value="2year">2년 내</option>
-        <option value="3plus">3년 이상</option>
-      </select>
-
-      <label>목표 지역 <span class="hint">예: 강남, 판교, 서울 마포구</span></label>
-      <input type="text" name="region" id="regionInput" list="regionList" placeholder="지역을 입력하세요" required>
+      <label>목표 지역 <span class="hint">동네·역 이름도 OK — 강남, 여의도, 잠실, 판교, 홍대…</span></label>
+      <input type="text" name="region" id="regionInput" list="regionList" placeholder="예: 강남 / 여의도 / 서울 마포구" required>
       <datalist id="regionList"></datalist>
     </div>
 
@@ -100,14 +116,13 @@
 
   <div id="apiConfig"></div>
   <div class="footer">
-    데이터 출처: 국토교통부 실거래가 공개시스템 · 본 분석은 참고용입니다<br>
-    입력 정보는 분석에만 사용됩니다
+    데이터: 국토교통부 실거래가 공개시스템 (매일 자동 갱신)<br>
+    입력 정보는 분석에만 사용되며 본 분석은 참고용입니다
   </div>
 </div>
 
 <script src="api.js"></script>
 <script>
-// 지역 자동완성 로드
 apiFetch('/api/real-estate/regions')
   .then((regions) => {
     document.getElementById('regionList').innerHTML =
@@ -115,7 +130,6 @@ apiFetch('/api/real-estate/regions')
   })
   .catch(() => { /* 백엔드 미연결 시 자유 입력 */ });
 
-// 이전 입력값 복원
 try {
   const saved = JSON.parse(localStorage.getItem('ormhome_input') || 'null');
   if (saved) {
@@ -134,7 +148,6 @@ document.getElementById('infoForm').addEventListener('submit', (e) => {
   const fd = new FormData(e.target);
   const data = Object.fromEntries(fd);
 
-  // family 필드 조합 (백엔드 호환)
   const children = parseInt(data.childrenCount) || 0;
   if (data.maritalStatus === 'married') {
     data.family = children === 0 ? 'married-no-child' : children === 1 ? 'married-1child' : 'married-2plus';
@@ -142,12 +155,8 @@ document.getElementById('infoForm').addEventListener('submit', (e) => {
     data.family = 'single';
   }
 
-  // 숫자 변환
-  ['salaryAmount', 'savingsAmount', 'jeonseDeposit', 'childrenCount'].forEach((k) => {
-    data[k] = data[k] === '' ? undefined : Number(data[k]);
-  });
-  ['homelessYears', 'subscriptionYears'].forEach((k) => {
-    data[k] = data[k] === '' ? undefined : Number(data[k]);
+  ['salaryAmount', 'savingsAmount', 'jeonseDeposit', 'childrenCount', 'homelessYears', 'subscriptionYears'].forEach((k) => {
+    data[k] = data[k] === '' || data[k] === undefined ? undefined : Number(data[k]);
   });
 
   try { localStorage.setItem('ormhome_input', JSON.stringify(data)); } catch (err) { /* 무시 */ }

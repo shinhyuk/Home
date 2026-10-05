@@ -25,7 +25,7 @@ app.use('/api/users', require('./routes/users'));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date() });
+  res.json({ status: 'OK', version: '1.1.0-static-data', timestamp: new Date() });
 });
 
 // 에러 핸들링

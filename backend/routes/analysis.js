@@ -10,8 +10,9 @@ router.post('/analyze', async (req, res) => {
   try {
     const userData = req.body;
 
-    if (!userData.salary || !userData.family || !userData.priority || !userData.region) {
-      return res.status(400).json({ error: '필수 입력값이 누락되었습니다. (salary, family, priority, region)' });
+    const hasIncome = userData.salary || Number(userData.salaryAmount) > 0;
+    if (!hasIncome || !userData.family || !userData.priority || !userData.region) {
+      return res.status(400).json({ error: '필수 입력값이 누락되었습니다. (연소득, 가족, 우선순위, 지역)' });
     }
 
     const result = await analysisService.analyzeStrategy(userData);

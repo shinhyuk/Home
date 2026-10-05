@@ -19,6 +19,37 @@ const SAVINGS_RANGES = {
   '50000': 60000,
 };
 
+// 입력 정규화: 직접 입력(만원) 우선, 없으면 범위 선택값 사용
+function normalizeInput(userData) {
+  const annualIncome = Number(userData.salaryAmount) > 0
+    ? Number(userData.salaryAmount)
+    : (SALARY_RANGES[userData.salary] || 4000);
+  const capital = Number(userData.savingsAmount) >= 0 && userData.savingsAmount !== undefined && userData.savingsAmount !== ''
+    ? Number(userData.savingsAmount)
+    : (SAVINGS_RANGES[userData.savings] || 5000);
+
+  // 부양가족 수: 배우자 + 자녀 (청약 가점용)
+  let dependents = 0;
+  const children = Number(userData.childrenCount);
+  if (userData.family && userData.family.startsWith('married')) {
+    dependents += 1; // 배우자
+    if (Number.isFinite(children)) dependents += children;
+    else if (userData.family === 'married-1child') dependents += 1;
+    else if (userData.family === 'married-2plus') dependents += 2;
+  } else if (Number.isFinite(children)) {
+    dependents += children;
+  }
+
+  return {
+    annualIncome,
+    capital,
+    dependents,
+    homelessYears: Number(userData.homelessYears) >= 0 ? Number(userData.homelessYears) : null,
+    subscriptionYears: Number(userData.subscriptionYears) >= 0 ? Number(userData.subscriptionYears) : null,
+    jeonseDeposit: Number(userData.jeonseDeposit) > 0 ? Number(userData.jeonseDeposit) : 0,
+  };
+}
+
 // ───────────────────────── 대출 계산 ─────────────────────────
 
 // 원리금균등 월상환액
@@ -55,10 +86,9 @@ function simulateLoan(principal, interestRate = 3.5, months = 360) {
 // ───────────────────────── 점수 계산 ─────────────────────────
 
 function calculateScores(userData, regionData) {
-  const { salary, family, savings, currentHome, timeline, priority } = userData;
+  const { family, currentHome, timeline, priority } = userData;
 
-  const annualIncome = SALARY_RANGES[salary] || 4000;
-  const capital = SAVINGS_RANGES[savings] || 5000;
+  const { annualIncome, capital } = normalizeInput(userData);
 
   // 구매력: 실제 지역 시세 대비 (가용예산 / 중위 매매가)
   let affordability = 50;
@@ -268,6 +298,127 @@ function generateDetails(strategy, scores, userData, regionData) {
   return { qualification, actions, warnings, risks };
 }
 
+// ───────────────────────── 청약 가점 (민영 일반공급 84점 만점) ─────────────────────────
+
+function subscriptionScore({ homelessYears, dependents, subscriptionYears }) {
+  // 무주택 기간: 1년 미만 2점, 1년당 +2점, 15년 이상 32점
+  let homeless = null;
+  if (homelessYears !== null) {
+    homeless = homelessYears < 1 ? 2 : Math.min(32, 2 + Math.floor(homelessYears) * 2);
+  }
+  // 부양가족: 0명 5점, 1명당 +5점, 6명 이상 35점
+  const family = Math.min(35, 5 + (dependents || 0) * 5);
+  // 청약통장 가입기간: 6개월 미만 1점, 1년 미만 2점, 1년당 +1점, 15년 이상 17점
+  let account = null;
+  if (subscriptionYears !== null) {
+    if (subscriptionYears < 0.5) account = 1;
+    else if (subscriptionYears < 1) account = 2;
+    else account = Math.min(17, 2 + Math.floor(subscriptionYears));
+  }
+
+  const known = (homeless ?? 0) + family + (account ?? 0);
+  const complete = homeless !== null && account !== null;
+  return {
+    homelessPoints: homeless,
+    familyPoints: family,
+    accountPoints: account,
+    total: complete ? known : null,
+    partialTotal: known,
+    maxTotal: 84,
+    complete,
+  };
+}
+
+// ───────────────────────── 트랙별 전략 (청약/전세/매매) ─────────────────────────
+
+function buildTracks(userData, norm, regionData, scores) {
+  const isHomeless = ['none', 'jeonse'].includes(userData.currentHome);
+  const medianPrice = regionData?.medianPrice || regionData?.avgPrice || null;
+  const jeonseAvg = regionData?.jeonseAvgDeposit || null;
+
+  // ── 매매 트랙 ──
+  let buy = { name: '매매', feasible: null };
+  if (medianPrice) {
+    const maxLoan = maxLoanCapacity(norm.annualIncome, medianPrice, isHomeless ? { ltv: 0.7 } : { ltv: 0.6 });
+    const budget = norm.capital + norm.jeonseDeposit + maxLoan; // 전세금 회수 가정
+    const ratio = budget / medianPrice;
+    const loan = Math.min(maxLoan, Math.max(0, medianPrice - norm.capital - norm.jeonseDeposit));
+    const sim = simulateLoan(loan);
+    buy = {
+      name: '매매',
+      feasible: ratio >= 1 ? 'possible' : ratio >= 0.7 ? 'tight' : 'hard',
+      budget: Math.round(budget),
+      medianPrice,
+      budgetRatio: Math.round(ratio * 100),
+      maxLoan,
+      monthlyPayment: sim.monthlyPayment,
+      shortfall: Math.max(0, medianPrice - budget),
+      note: ratio >= 1
+        ? '현재 예산으로 중위가격대 매수 가능. 급매·경매 활용 시 여유 확보.'
+        : ratio >= 0.7
+          ? '소형 평수·구축 또는 인근 지역으로 눈높이 조정 시 가능.'
+          : '현 시세 기준 진입 어려움. 자금 축적 또는 지역 변경 필요.',
+    };
+  }
+
+  // ── 전세 트랙 ──
+  let jeonse = { name: '전세', feasible: null };
+  if (jeonseAvg) {
+    // 전세대출: 보증금의 80%, 한도 4.4억 (일반 기준 단순화)
+    const jeonseLoan = Math.min(Math.round(jeonseAvg * 0.8), 44000);
+    const jeonseBudget = norm.capital + norm.jeonseDeposit + jeonseLoan;
+    const ratio = jeonseBudget / jeonseAvg;
+    // 전세대출 이자 (연 3.8% 가정, 이자만 납부)
+    const actualLoan = Math.min(jeonseLoan, Math.max(0, jeonseAvg - norm.capital - norm.jeonseDeposit));
+    const monthlyInterest = Math.round((actualLoan * 0.038) / 12);
+    jeonse = {
+      name: '전세',
+      feasible: ratio >= 1 ? 'possible' : ratio >= 0.8 ? 'tight' : 'hard',
+      avgDeposit: jeonseAvg,
+      budget: Math.round(jeonseBudget),
+      budgetRatio: Math.round(ratio * 100),
+      loanNeeded: actualLoan,
+      monthlyInterest,
+      jeonseRatio: regionData.jeonseRatio,
+      note: ratio >= 1
+        ? `평균 전세가 ${Math.round(jeonseAvg / 10000)}억 진입 가능. 월 이자 약 ${monthlyInterest}만원.`
+        : '평균 전세가 대비 자금 부족. 보증금 낮은 매물 또는 월세 혼합 검토.',
+      warning: regionData.jeonseRatio >= 80 ? '전세가율 80% 이상 — 깡통전세 위험, 보증보험 필수' : null,
+    };
+  }
+
+  // ── 청약 트랙 ──
+  const score = subscriptionScore(norm);
+  const competitive = score.total !== null ? score.total >= 50 : null; // 수도권 인기지역 당첨선 대략 50~70점
+  const subscription = {
+    name: '청약',
+    feasible: !isHomeless ? 'ineligible' : (competitive === null ? 'unknown' : competitive ? 'possible' : 'tight'),
+    eligible: isHomeless,
+    score,
+    specialSupply: [],
+    note: '',
+  };
+  if (isHomeless) {
+    // 특별공급 자격 추정
+    if (norm.dependents >= 3) subscription.specialSupply.push('다자녀 특별공급');
+    if (userData.family === 'married-no-child' || userData.family === 'married-1child') subscription.specialSupply.push('신혼부부 특별공급 (혼인 7년 이내 시)');
+    subscription.specialSupply.push('생애최초 특별공급 (최초 구입 시)');
+    if (score.total !== null) {
+      subscription.note = score.total >= 60
+        ? `가점 ${score.total}점 — 인기 단지도 노려볼 만한 수준. 일반공급 적극 지원.`
+        : score.total >= 45
+          ? `가점 ${score.total}점 — 중위권. 특별공급 병행 + 비인기 타입 공략.`
+          : `가점 ${score.total}점 — 가점제 불리. 추첨제 물량·특별공급 집중.`;
+    } else {
+      subscription.note = '무주택 기간·청약통장 납입기간을 입력하면 정확한 가점을 계산합니다.';
+    }
+  } else {
+    subscription.note = '유주택자는 1순위 청약 제한. 처분 조건부 또는 추첨제만 가능.';
+  }
+
+  return { buy, jeonse, subscription };
+}
+
 // ───────────────────────── 메인 분석 ─────────────────────────
 
 async function analyzeStrategy(userData) {
@@ -276,7 +427,9 @@ async function analyzeStrategy(userData) {
   // 실제 국토교통부 실거래 데이터 조회
   const regionData = await realEstateService.getRegionData(region);
 
+  const norm = normalizeInput(userData);
   const scores = calculateScores(userData, regionData);
+  const tracks = buildTracks(userData, norm, regionData, scores);
   const strategy = determineStrategy({ scores, priority: userData.priority, currentHome: userData.currentHome, regionData });
   strategy.score = scores.overall;
 
@@ -301,6 +454,7 @@ async function analyzeStrategy(userData) {
 
   return {
     strategy,
+    tracks,
     details,
     scores: {
       affordability: scores.affordability,

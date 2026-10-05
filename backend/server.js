@@ -9,6 +9,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 프론트엔드 정적 서빙 (http://localhost:5000 접속 시 입력 페이지)
+app.use(express.static(require('path').join(__dirname, '..', 'frontend')));
+
 // MongoDB 연결 (실패해도 서버는 동작 — 캐시는 메모리로 대체)
 const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/ormhome';
 mongoose.connect(mongoURI, { serverSelectionTimeoutMS: 5000 })

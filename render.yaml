@@ -4,6 +4,7 @@ services:
     name: ormhome-backend
     runtime: node
     plan: free
+    region: singapore  # 국토부 API가 미국 IP를 403 차단 → 아시아 리전 사용
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start

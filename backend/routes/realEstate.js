@@ -13,6 +13,25 @@ router.get('/usage', (req, res) => {
   res.json(molitApi.getDailyUsage());
 });
 
+// GET /api/real-estate/diag - 국토부 API 연결 진단 (1콜)
+router.get('/diag', async (req, res) => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 1);
+  const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
+  try {
+    const page = await molitApi.fetchPage('apt-trade', '11680', ym, 1, 1);
+    res.json({ ok: true, dealYmd: ym, totalCount: page.totalCount, keySet: Boolean(process.env.MOLIT_API_KEY) });
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      dealYmd: ym,
+      keySet: Boolean(process.env.MOLIT_API_KEY),
+      error: error.message,
+      httpStatus: error.response?.status || null,
+    });
+  }
+});
+
 // GET /api/real-estate/summary/:region - 지역 종합 시세 (매매+전월세, 3개 유형)
 router.get('/summary/:region', async (req, res) => {
   try {

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const realEstateService = require('../services/realEstateService');
 const molitApi = require('../services/molitApi');
+const geoService = require('../services/geoService');
 
 // GET /api/real-estate/regions - 지원 지역 목록
 router.get('/regions', (req, res) => {
@@ -70,6 +71,21 @@ router.get('/trend/:region', async (req, res) => {
   } catch (error) {
     console.error('추세 조회 오류:', error);
     res.status(500).json({ error: '추세 조회 실패', detail: error.message });
+  }
+});
+
+// POST /api/real-estate/geo/batch - 단지 좌표 조회 (최대 20건, 캐시됨)
+router.post('/geo/batch', async (req, res) => {
+  try {
+    const items = req.body?.items;
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({ error: 'items 배열이 필요합니다.' });
+    }
+    const results = await geoService.geocodeBatch(items);
+    res.json(results);
+  } catch (error) {
+    console.error('지오코딩 오류:', error);
+    res.status(500).json({ error: '좌표 조회 실패' });
   }
 });
 

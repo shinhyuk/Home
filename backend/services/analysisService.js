@@ -512,7 +512,7 @@ async function buildRecommendations(userData, norm, regionData, buyTrack) {
         .sort((a, b) => (b.changeRate ?? -99) - (a.changeRate ?? -99));
 
       result.regions = {
-        affordable: scored.slice(0, 8),
+        affordable: scored.slice(0, 30),
         totalScanned: summary.regions.length,
         generatedAt: summary.generatedAt,
       };

@@ -276,6 +276,7 @@ async function getComplexStats(regionInput, types = ['apt-trade']) {
     const areas = withArea.map((i) => i.area).sort((a, b) => a - b);
     complexes.push({
       type: typeLabel, name, dong,
+      jibun: list.find((i) => i.jibun)?.jibun || '',
       count: list.length,
       medianPrice: median(amounts),
       minPrice: amounts[0],

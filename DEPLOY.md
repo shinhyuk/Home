@@ -5,7 +5,7 @@
 | 레이어 | 호스팅 | URL |
 |--------|--------|-----|
 | 프론트엔드 | GitHub Pages (자동배포) | https://shinhyuk.github.io/Home/ |
-| 백엔드 | Render (Blueprint) | https://ormhome-backend.onrender.com |
+| 백엔드 | Render (Blueprint) | https://ormhome-backend-sirl.onrender.com |
 
 ## 백엔드 배포 (Render, 최초 1회)
 
@@ -34,8 +34,8 @@
 ## 배포 확인
 
 ```
-https://ormhome-backend.onrender.com/health          → {"status":"OK",...}
-https://ormhome-backend.onrender.com/api/real-estate/regions → 지역 목록
+https://ormhome-backend-sirl.onrender.com/health          → {"status":"OK",...}
+https://ormhome-backend-sirl.onrender.com/api/real-estate/regions → 지역 목록
 ```
 
 프론트(https://shinhyuk.github.io/Home/)에서 정보 입력 → 분석이 되면 끝.

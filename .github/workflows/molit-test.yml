@@ -1,0 +1,29 @@
+name: MOLIT API reachability test
+
+# GitHub Actions 러너 IP에서 국토부 API 접속 가능 여부 확인
+# 키 없이 호출: 정상 접근 가능하면 200(인증오류 XML), IP 차단이면 403
+on:
+  push:
+    paths: ['.github/workflows/molit-test.yml']
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe apis.data.go.kr
+        run: |
+          code=$(curl -sS -o /tmp/body.txt -w "%{http_code}" --max-time 30 \
+            "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev?LAWD_CD=11680&DEAL_YMD=202508" || echo "FAIL")
+          echo "HTTP status: $code"
+          echo "--- body (first 300 chars) ---"
+          head -c 300 /tmp/body.txt || true
+          echo
+          if [ "$code" = "403" ]; then
+            echo "RESULT: BLOCKED (403) — GitHub 러너 IP도 차단됨"
+            exit 1
+          elif [ "$code" = "200" ]; then
+            echo "RESULT: REACHABLE — GitHub Actions에서 수집 가능"
+          else
+            echo "RESULT: UNKNOWN ($code)"
+          fi

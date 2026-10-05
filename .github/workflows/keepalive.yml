@@ -11,4 +11,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping health endpoint
-        run: curl -sS --max-time 30 https://ormhome-backend.onrender.com/health || true
+        run: curl -sS --max-time 30 https://ormhome-backend-sirl.onrender.com/health || true

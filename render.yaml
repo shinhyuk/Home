@@ -4,8 +4,7 @@ services:
     name: ormhome-backend
     runtime: node
     plan: free
-    # region 미지정: 기존 서비스 리전 유지 (리전 변경은 Blueprint 동기화 불가)
-    # 국토부 데이터는 GitHub Actions가 수집하므로 서버 리전 무관
+    region: singapore  # 현 서비스(-sirl)의 실제 리전과 일치해야 동기화 성공
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start

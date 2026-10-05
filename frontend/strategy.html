@@ -120,6 +120,18 @@ async function run() {
 
 function render(r) {
   document.getElementById('loading').hidden = true;
+
+  // 지역 미인식 → 결과 대신 재입력 안내
+  const rdCheck = r.regionData || {};
+  if (rdCheck.error || (!rdCheck.avgPrice && !rdCheck.tradeCount)) {
+    document.getElementById('error').hidden = false;
+    document.getElementById('errorMsg').innerHTML =
+      '입력하신 지역을 인식하지 못해 시세 분석을 할 수 없습니다.<br>' +
+      '<b>동네/역 이름</b>(예: 강남, 여의도, 잠실, 판교, 홍대) 또는 ' +
+      '<b>시군구</b>(예: 서울 마포구)로 다시 입력해주세요.';
+    return;
+  }
+
   document.getElementById('result').hidden = false;
 
   // 종합 전략

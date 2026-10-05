@@ -74,7 +74,7 @@
     <div class="col-side">
       <!-- 내 예산 -->
       <div class="card" id="loanCard" hidden>
-        <h2>💰 내 예산 분해 <span class="sub">DSR 40% · 30년 · 연 3.5%</span></h2>
+        <h2>💰 내 예산 분해 <span class="sub">스트레스 DSR 40% · 30년 · 연 4.0% · 2026.10 규제</span></h2>
         <div id="loanBox"></div>
       </div>
 
@@ -185,7 +185,7 @@ function render(r) {
 
     const rowOf = (c, extra) => `
       <tr>
-        <td><b>${c.name}</b><span class="minor">${c.dong} · ${c.buildYear ? c.buildYear + '년' : ''} · ${areaToPyeong(c.areaRange)}</span></td>
+        <td><b>${c.name}</b> <span class="badge" style="margin-left:4px">${c.type || '아파트'}</span><span class="minor">${c.dong} · ${c.buildYear ? c.buildYear + '년' : ''} · ${areaToPyeong(c.areaRange)}</span></td>
         <td>${c.count}건</td>
         <td><b>${fmtMoney(c.medianPrice)}</b><span class="minor">${fmtMoney(c.minPrice)}~${fmtMoney(c.maxPrice)}</span></td>
         <td>${fmtMoney(c.avgPerPyeong)}</td>
@@ -255,8 +255,8 @@ function render(r) {
     html += trackCard(t.jeonse,
       kv('지역 평균 전세보증금', fmtMoney(t.jeonse.avgDeposit))
       + kv('내 전세 예산 (자금+전세대출)', fmtMoney(t.jeonse.budget))
-      + kv('필요 전세대출', fmtMoney(t.jeonse.loanNeeded))
-      + kv('월 이자 (연 3.8%)', fmtMoney(t.jeonse.monthlyInterest))
+      + kv('필요 전세대출 <span class="muted">(보증 80%·수도권 한도 6억)</span>', fmtMoney(t.jeonse.loanNeeded))
+      + kv('월 이자 (전세대출)', fmtMoney(t.jeonse.monthlyInterest))
       + kv('전세가율', (t.jeonse.jeonseRatio ?? '-') + '%'));
   }
   if (t.buy && t.buy.feasible) {

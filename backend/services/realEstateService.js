@@ -236,17 +236,32 @@ async function getRegionData(regionInput) {
 
 // ───────────────────────── 단지별 집계 (최근 6개월 아파트 매매) ─────────────────────────
 
-async function getComplexStats(regionInput) {
+// 수집 범위: 아파트 6개월, 오피스텔·연립다세대 2개월
+const COMPLEX_SOURCES = {
+  'apt-trade': { label: '아파트', months: 6 },
+  'offi-trade': { label: '오피스텔', months: 2 },
+  'rh-trade': { label: '연립다세대', months: 2 },
+};
+
+async function getComplexStats(regionInput, types = ['apt-trade']) {
   const region = resolveLawdCode(regionInput);
   if (!region) return null;
 
-  const months = recentMonths(6);
-  const items = await collectMonths('apt-trade', region.code, months);
-  const valid = items.filter((i) => !i.cancelled && i.dealAmount > 0 && i.name);
+  const valid = [];
+  for (const type of types) {
+    const src = COMPLEX_SOURCES[type];
+    if (!src) continue;
+    const items = await collectMonths(type, region.code, recentMonths(src.months));
+    for (const i of items) {
+      if (!i.cancelled && i.dealAmount > 0 && i.name) {
+        valid.push({ ...i, typeLabel: src.label });
+      }
+    }
+  }
 
   const groups = new Map();
   for (const i of valid) {
-    const key = `${i.name}|${i.dong}`;
+    const key = `${i.typeLabel}|${i.name}|${i.dong}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(i);
   }
@@ -254,13 +269,13 @@ async function getComplexStats(regionInput) {
   const complexes = [];
   for (const [key, list] of groups) {
     if (list.length < 3) continue; // 표본 3건 미만 제외
-    const [name, dong] = key.split('|');
+    const [typeLabel, name, dong] = key.split('|');
     const amounts = list.map((i) => i.dealAmount).sort((a, b) => a - b);
     const withArea = list.filter((i) => i.area > 0);
     const perP = withArea.map((i) => i.dealAmount / (i.area / PYEONG));
     const areas = withArea.map((i) => i.area).sort((a, b) => a - b);
     complexes.push({
-      name, dong,
+      type: typeLabel, name, dong,
       count: list.length,
       medianPrice: median(amounts),
       minPrice: amounts[0],

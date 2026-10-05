@@ -106,6 +106,13 @@
         </div>
       </div>
 
+      <label>관심 주택 유형 <span class="hint">선택한 유형만 추천에 포함됩니다</span></label>
+      <select name="housingTypes">
+        <option value="apt" selected>아파트만</option>
+        <option value="apt-offi">아파트 + 오피스텔</option>
+        <option value="all">전부 (아파트·오피스텔·연립다세대)</option>
+      </select>
+
       <label>목표 지역 <span class="hint">동네·역 이름도 OK — 강남, 여의도, 잠실, 판교, 홍대…</span></label>
       <input type="text" name="region" id="regionInput" list="regionList" placeholder="예: 강남 / 여의도 / 서울 마포구" required>
       <datalist id="regionList"></datalist>

@@ -50,29 +50,75 @@ function normalizeInput(userData) {
   };
 }
 
+// ───────────────────────── 2026.10 기준 대출 규제 ─────────────────────────
+// 출처: 금융위 6.27 대책 + 10.15 주택시장 안정화 대책
+const REGULATION = {
+  asOf: '2026년 10월',
+  mortgageRate: 4.0,   // 주담대 대표금리 (시중은행 3.3~5.9% 중간값대)
+  jeonseRate: 3.9,     // 전세대출 대표금리
+  stressAdd: 1.5,      // 스트레스 DSR 가산금리 (%p)
+  dsr: 0.4,
+  maxTermYears: 30,    // 10.15 대책: 주담대 만기 30년 상한
+  // 10.15 대책: 주택가격 구간별 주담대 상한 (만원)
+  mortgageCapByPrice: [
+    { maxPrice: 150000, cap: 60000 },  // 15억 이하 → 6억
+    { maxPrice: 250000, cap: 40000 },  // 15~25억 → 4억
+    { maxPrice: Infinity, cap: 20000 },// 25억 초과 → 2억
+  ],
+  ltv: { firstHome: 0.7, oneHome: 0.6 }, // 다주택 추가구입은 주담대 금지(0)
+  jeonse: { guaranteeRatio: 0.8, capMetro: 60000 }, // 보증 80%, 수도권 한도 6억
+};
+
+function mortgagePriceCap(housePrice) {
+  if (!housePrice) return Infinity;
+  for (const tier of REGULATION.mortgageCapByPrice) {
+    if (housePrice <= tier.maxPrice) return tier.cap;
+  }
+  return 20000;
+}
+
 // ───────────────────────── 대출 계산 ─────────────────────────
 
 // 원리금균등 월상환액
-function monthlyPayment(principal, annualRate = 3.5, years = 30) {
+function monthlyPayment(principal, annualRate = REGULATION.mortgageRate, years = 30) {
   const r = annualRate / 100 / 12;
   const n = years * 12;
   if (r === 0) return principal / n;
   return principal * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
 }
 
-// DSR 40% + LTV 70% 기준 최대 대출액 (만원)
-function maxLoanCapacity(annualIncome, housePrice, { dsr = 0.4, ltv = 0.7, rate = 3.5, years = 30 } = {}) {
+// 최대 주담대 한도 (만원) — DSR(스트레스 금리) + LTV + 가격구간별 상한 + 다주택 금지
+function maxLoanCapacity(annualIncome, housePrice, opts = {}) {
+  const {
+    currentHome = 'none',
+    rate = REGULATION.mortgageRate,
+    years = REGULATION.maxTermYears,
+    dsr = REGULATION.dsr,
+  } = opts;
+
+  // 다주택자 추가 구입: 주담대 금지 (10.15 대책)
+  if (currentHome === 'multi') return 0;
+
+  // DSR: 스트레스 금리(실금리 + 가산)로 산정
+  const stressRate = rate + REGULATION.stressAdd;
   const maxMonthly = (annualIncome / 12) * dsr;
-  // 월상환액 → 원금 역산
-  const r = rate / 100 / 12;
+  const r = stressRate / 100 / 12;
   const n = years * 12;
   const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
   const dsrLimit = maxMonthly / factor;
+
+  // LTV
+  const isFirst = currentHome === 'none' || currentHome === 'jeonse' || currentHome === 'first-time';
+  const ltv = isFirst ? REGULATION.ltv.firstHome : REGULATION.ltv.oneHome;
   const ltvLimit = housePrice ? housePrice * ltv : Infinity;
-  return Math.round(Math.min(dsrLimit, ltvLimit));
+
+  // 가격구간별 절대 상한
+  const priceCap = mortgagePriceCap(housePrice);
+
+  return Math.round(Math.min(dsrLimit, ltvLimit, priceCap));
 }
 
-function simulateLoan(principal, interestRate = 3.5, months = 360) {
+function simulateLoan(principal, interestRate = REGULATION.mortgageRate, months = 360) {
   const payment = monthlyPayment(principal, interestRate, months / 12);
   const totalPayment = payment * months;
   return {
@@ -95,7 +141,7 @@ function calculateScores(userData, regionData) {
   let budgetRatio = null;
   const medianPrice = regionData?.medianPrice || regionData?.avgPrice;
   if (medianPrice) {
-    const loan = maxLoanCapacity(annualIncome, medianPrice);
+    const loan = maxLoanCapacity(annualIncome, medianPrice, { currentHome });
     const maxBudget = capital + loan;
     budgetRatio = maxBudget / medianPrice;
     affordability = Math.min(100, Math.round(budgetRatio * 60)); // ratio 1.0 → 60점, 1.67 → 100점
@@ -218,7 +264,7 @@ function generateDetails(strategy, scores, userData, regionData) {
   } else if (currentHome === 'first-time') {
     qualification.push('✓ 1주택자 — 갈아타기 시 일시적 2주택 비과세 활용 가능');
   } else {
-    qualification.push('⚠ 다주택 — 취득세 중과(8~12%) 및 종부세 대상 여부 확인 필요');
+    qualification.push('⚠ 다주택 — 추가 구입 시 주담대 금지(10.15 대책), 취득세 중과(8~12%)·종부세 확인 필요');
   }
 
   // 예산 분석
@@ -292,7 +338,8 @@ function generateDetails(strategy, scores, userData, regionData) {
     }
   }
 
-  warnings.push('• 금리 변동 시 상환 부담이 달라집니다 — 고정/변동 금리 비교 필수');
+  warnings.push(`• ${REGULATION.asOf} 규제 반영: 주담대 상한(15억↓ 6억·15~25억 4억·25억↑ 2억), 스트레스 DSR(+${REGULATION.stressAdd}%p), 다주택 추가 주담대 금지, 전세대출 보증 80%·수도권 6억 한도`);
+  warnings.push('• 금리 변동 시 상환 부담이 달라집니다 — 고정/변동 금리 비교 필수 (주담대 ' + REGULATION.mortgageRate + '%, 전세 ' + REGULATION.jeonseRate + '% 가정)');
   warnings.push('• 본 분석은 공공데이터 기반 참고자료이며, 실제 거래 전 전문가 상담을 권장합니다');
 
   return { qualification, actions, warnings, risks };
@@ -339,7 +386,7 @@ function buildTracks(userData, norm, regionData, scores) {
   // ── 매매 트랙 ──
   let buy = { name: '매매', feasible: null };
   if (medianPrice) {
-    const maxLoan = maxLoanCapacity(norm.annualIncome, medianPrice, isHomeless ? { ltv: 0.7 } : { ltv: 0.6 });
+    const maxLoan = maxLoanCapacity(norm.annualIncome, medianPrice, { currentHome: userData.currentHome });
     const budget = norm.capital + norm.jeonseDeposit + maxLoan; // 전세금 회수 가정
     const ratio = budget / medianPrice;
     const loan = Math.min(maxLoan, Math.max(0, medianPrice - norm.capital - norm.jeonseDeposit));
@@ -364,13 +411,13 @@ function buildTracks(userData, norm, regionData, scores) {
   // ── 전세 트랙 ──
   let jeonse = { name: '전세', feasible: null };
   if (jeonseAvg) {
-    // 전세대출: 보증금의 80%, 한도 4.4억 (일반 기준 단순화)
-    const jeonseLoan = Math.min(Math.round(jeonseAvg * 0.8), 44000);
+    // 전세대출: 보증비율 80%, 수도권 한도 6억 (2026.10 규제)
+    const jeonseLoan = Math.min(Math.round(jeonseAvg * REGULATION.jeonse.guaranteeRatio), REGULATION.jeonse.capMetro);
     const jeonseBudget = norm.capital + norm.jeonseDeposit + jeonseLoan;
     const ratio = jeonseBudget / jeonseAvg;
     // 전세대출 이자 (연 3.8% 가정, 이자만 납부)
     const actualLoan = Math.min(jeonseLoan, Math.max(0, jeonseAvg - norm.capital - norm.jeonseDeposit));
-    const monthlyInterest = Math.round((actualLoan * 0.038) / 12);
+    const monthlyInterest = Math.round((actualLoan * (REGULATION.jeonseRate / 100)) / 12);
     jeonse = {
       name: '전세',
       feasible: ratio >= 1 ? 'possible' : ratio >= 0.8 ? 'tight' : 'hard',
@@ -425,9 +472,15 @@ async function buildRecommendations(userData, norm, regionData, buyTrack) {
   const budget = buyTrack?.budget || (norm.capital + norm.jeonseDeposit);
   const result = { budget, complexes: null, regions: null };
 
-  // 1) 목표 지역 내 단지 추천 (최근 6개월 실거래)
+  // 1) 목표 지역 내 단지 추천 — 사용자가 고른 주택 유형만
+  const typeMap = {
+    'apt': ['apt-trade'],
+    'apt-offi': ['apt-trade', 'offi-trade'],
+    'all': ['apt-trade', 'offi-trade', 'rh-trade'],
+  };
+  const types = typeMap[userData.housingTypes] || typeMap['apt']; // 기본: 아파트만
   try {
-    const stats = await realEstateService.getComplexStats(userData.region);
+    const stats = await realEstateService.getComplexStats(userData.region, types);
     if (stats && stats.complexes.length) {
       const within = stats.complexes
         .filter((c) => c.medianPrice && c.medianPrice <= budget)
@@ -451,7 +504,7 @@ async function buildRecommendations(userData, norm, regionData, buyTrack) {
         .filter((r) => r.medianPrice && r.tradeCount >= 10)
         .map((r) => {
           // 지역별 예산: 자금 + min(DSR한도, 해당 지역 중위가의 LTV 70%)
-          const loan = maxLoanCapacity(norm.annualIncome, r.medianPrice);
+          const loan = maxLoanCapacity(norm.annualIncome, r.medianPrice, { currentHome: userData.currentHome });
           const regionBudget = norm.capital + norm.jeonseDeposit + loan;
           return { ...r, fit: Math.round((regionBudget / r.medianPrice) * 100) };
         })
@@ -492,7 +545,7 @@ async function analyzeStrategy(userData) {
   let loanSimulation = null;
   const medianPrice = regionData?.medianPrice || regionData?.avgPrice;
   if (medianPrice) {
-    const loan = maxLoanCapacity(scores.annualIncome, medianPrice);
+    const loan = maxLoanCapacity(scores.annualIncome, medianPrice, { currentHome: userData.currentHome });
     const needed = Math.max(0, medianPrice - scores.capital);
     const actualLoan = Math.min(loan, needed);
     loanSimulation = {
@@ -524,6 +577,7 @@ async function analyzeStrategy(userData) {
 }
 
 module.exports = {
+  REGULATION,
   analyzeStrategy,
   calculateScores,
   simulateLoan,

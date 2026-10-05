@@ -1,6 +1,7 @@
 // 국토부 실거래 데이터 수집기 — GitHub Actions에서 실행
 // (Render 등 해외 클라우드 IP는 국토부 API가 403 차단 → Actions 러너가 대신 수집)
 // 사용: node backend/scripts/collect.js <출력디렉토리>
+// 필요 환경변수: MOLIT_API_KEY (GitHub Secrets에 등록)
 const fs = require('fs');
 const path = require('path');
 const molitApi = require('../services/molitApi');

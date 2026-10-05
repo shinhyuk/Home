@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const analysisService = require('../services/analysisService');
+const { REGULATION } = analysisService;
 const realEstateService = require('../services/realEstateService');
 const Analysis = require('../models/Analysis');
 const mongoose = require('mongoose');
@@ -78,9 +79,9 @@ router.get('/loan-capacity', (req, res) => {
     const maxLoan = analysisService.maxLoanCapacity(
       parseInt(income),
       housePrice ? parseInt(housePrice) : null,
-      { rate: parseFloat(rate) || 3.5 }
+      { rate: parseFloat(rate) || REGULATION.mortgageRate }
     );
-    res.json({ income: parseInt(income), maxLoan, basis: 'DSR 40% + LTV 70%, 30년 원리금균등' });
+    res.json({ income: parseInt(income), maxLoan, basis: `스트레스 DSR 40%(+${REGULATION.stressAdd}%p) · 가격구간 상한 · 30년 원리금균등 · ${REGULATION.asOf} 규제` });
   } catch (error) {
     res.status(500).json({ error: '계산 실패', detail: error.message });
   }

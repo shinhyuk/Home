@@ -480,7 +480,7 @@ async function buildRecommendations(userData, norm, regionData, buyTrack) {
   };
   const types = typeMap[userData.housingTypes] || typeMap['apt']; // 기본: 아파트만
   try {
-    const stats = await realEstateService.getComplexStats(userData.region, types);
+    const stats = await realEstateService.getComplexStats(userData.region, types, userData.areaBand || 'mid84');
     if (stats && stats.complexes.length) {
       const within = stats.complexes
         .filter((c) => c.medianPrice && c.medianPrice <= budget)
@@ -531,19 +531,43 @@ async function analyzeStrategy(userData) {
 
   // 실제 국토교통부 실거래 데이터 조회
   const regionData = await realEstateService.getRegionData(region);
-
   const norm = normalizeInput(userData);
-  const scores = calculateScores(userData, regionData);
-  const tracks = buildTracks(userData, norm, regionData, scores);
-  const recommendations = await buildRecommendations(userData, norm, regionData, tracks.buy);
-  const strategy = determineStrategy({ scores, priority: userData.priority, currentHome: userData.currentHome, regionData });
+
+  // 희망 평형대 기준으로 중위가·전세가 재계산 (표본 8건 이상일 때)
+  const bandKey = userData.areaBand || 'mid84';
+  let effRegion = regionData;
+  let areaBasis = null;
+  if (!regionData.error) {
+    try {
+      const banded = await realEstateService.getBandedStats(region, bandKey);
+      if (banded) {
+        if (bandKey !== 'any' && banded.count >= 8) {
+          effRegion = {
+            ...regionData,
+            medianPrice: banded.medianPrice,
+            avgPerPyeong: banded.avgPerPyeong || regionData.avgPerPyeong,
+            jeonseAvgDeposit: banded.jeonseAvgDeposit || regionData.jeonseAvgDeposit,
+          };
+          areaBasis = { label: banded.label, count: banded.count, applied: true };
+        } else {
+          areaBasis = { label: banded.label, count: banded.count, applied: false,
+            note: bandKey === 'any' ? null : '해당 평형 표본 부족 — 전체 평형 기준 계산' };
+        }
+      }
+    } catch (e) { console.warn('평형 통계 실패:', e.message); }
+  }
+
+  const scores = calculateScores(userData, effRegion);
+  const tracks = buildTracks(userData, norm, effRegion, scores);
+  const recommendations = await buildRecommendations(userData, norm, effRegion, tracks.buy);
+  const strategy = determineStrategy({ scores, priority: userData.priority, currentHome: userData.currentHome, regionData: effRegion });
   strategy.score = scores.overall;
 
-  const details = generateDetails(strategy, scores, userData, regionData);
+  const details = generateDetails(strategy, scores, userData, effRegion);
 
   // 대출 시뮬레이션 (지역 중위가 기준)
   let loanSimulation = null;
-  const medianPrice = regionData?.medianPrice || regionData?.avgPrice;
+  const medianPrice = effRegion?.medianPrice || effRegion?.avgPrice;
   if (medianPrice) {
     const loan = maxLoanCapacity(scores.annualIncome, medianPrice, { currentHome: userData.currentHome });
     const needed = Math.max(0, medianPrice - scores.capital);
@@ -560,6 +584,7 @@ async function analyzeStrategy(userData) {
 
   return {
     strategy,
+    areaBasis,
     tracks,
     recommendations,
     details,

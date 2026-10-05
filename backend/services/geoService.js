@@ -32,12 +32,30 @@ async function geocodeOne(query) {
       await cache.set(key, coord, GEO_TTL);
       return coord;
     }
-    await cache.set(key, 'NONE', GEO_TTL);
-    return null;
   } catch (err) {
-    console.warn('지오코딩 실패:', query, err.message);
-    return null;
+    console.warn('Nominatim 실패 → Photon 폴백:', query, err.message);
   }
+
+  // 폴백: Photon (OSM 기반, 데이터센터 IP에 관대)
+  try {
+    const res2 = await axios.get('https://photon.komoot.io/api/', {
+      params: { q: query, limit: 1 },
+      headers: { 'User-Agent': UA },
+      timeout: 10000,
+    });
+    const f = res2.data?.features?.[0];
+    if (f?.geometry?.coordinates) {
+      const [lon, lat] = f.geometry.coordinates;
+      const coord = { lat, lon };
+      await cache.set(key, coord, GEO_TTL);
+      return coord;
+    }
+  } catch (err) {
+    console.warn('Photon도 실패:', query, err.message);
+  }
+
+  await cache.set(key, 'NONE', 60 * 60 * 1000); // 실패는 1시간만 캐시
+  return null;
 }
 
 // 배치: 지번 주소 우선, 실패 시 동 단위로 폴백

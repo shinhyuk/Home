@@ -259,6 +259,12 @@ function render(r) {
   }
 
   document.getElementById('result').hidden = false;
+  if (r.areaBasis && r.areaBasis.applied === false && r.areaBasis.note) {
+    const n = document.createElement('div');
+    n.className = 'notice span-all';
+    n.textContent = '📐 ' + r.areaBasis.note + ` (해당 평형 거래 ${r.areaBasis.count}건)`;
+    document.getElementById('result').prepend(n);
+  }
 
   // ── 히어로 ──
   document.getElementById('stTitle').textContent = r.strategy.title;
@@ -270,7 +276,9 @@ function render(r) {
     heroStats.push({ k: '가능 대출', v: fmtMoney(l.maxLoanByDSR) });
     heroStats.push({ k: '월 상환 (권장대출 시)', v: fmtMoney(l.monthlyPayment) });
   }
-  heroStats.push({ k: `${rd.name} 중위가`, v: fmtMoney(rd.medianPrice) });
+  const ab = r.areaBasis;
+  const basisTag = ab && ab.applied ? ` (${ab.label.split(' · ')[0]})` : '';
+  heroStats.push({ k: `${rd.name} 중위가${basisTag}`, v: fmtMoney((ab && ab.applied && r.tracks?.buy?.medianPrice) || rd.medianPrice) });
   document.getElementById('heroStats').innerHTML =
     heroStats.map((s) => `<div class="hs"><div class="v">${s.v}</div><div class="k">${s.k}</div></div>`).join('');
 
@@ -280,7 +288,7 @@ function render(r) {
   if (cx && (cx.within?.length || cx.stretch?.length)) {
     document.getElementById('complexCard').hidden = false;
     CX_REGION = cx.regionName;
-    document.getElementById('complexBasis').textContent = `${cx.regionName} · ${cx.basis}`;
+    document.getElementById('complexBasis').textContent = `${cx.regionName} · ${cx.basis}` + (r.areaBasis ? ` · ${r.areaBasis.label}` : '');
 
     const rowOf = (c, extra) => `
       <tr>
@@ -352,7 +360,7 @@ function render(r) {
   }
   if (t.buy && t.buy.feasible) {
     html += trackCard(t.buy,
-      kv('지역 중위 매매가', fmtMoney(t.buy.medianPrice))
+      kv('중위 매매가' + (r.areaBasis && r.areaBasis.applied ? ' <span class="muted">(' + r.areaBasis.label.split(' · ')[0] + ' 기준)</span>' : ''), fmtMoney(t.buy.medianPrice))
       + kv('내 최대 예산 (자금+대출)', fmtMoney(t.buy.budget))
       + kv('예산 충족률', t.buy.budgetRatio + '%', true)
       + kv('월 상환액', fmtMoney(t.buy.monthlyPayment))
@@ -389,7 +397,7 @@ function render(r) {
       kv('보유 자금 (전세금 회수 포함)', fmtMoney(l.ownCapital))
       + kv('DSR 기준 최대 대출', fmtMoney(l.maxLoanByDSR))
       + kv('= 내 최대 예산', fmtMoney(l.ownCapital + l.maxLoanByDSR), true)
-      + kv('기준 주택가 (지역 중위)', fmtMoney(l.housePrice))
+      + kv('기준 주택가' + (r.areaBasis && r.areaBasis.applied ? ' <span class="muted">(' + r.areaBasis.label.split(' · ')[0] + ' 중위)</span>' : ' (지역 중위)'), fmtMoney(l.housePrice))
       + kv('권장 대출액', fmtMoney(l.recommendedLoan))
       + kv('월 상환액', fmtMoney(l.monthlyPayment))
       + kv('총 이자 (30년)', fmtMoney(l.totalInterest))

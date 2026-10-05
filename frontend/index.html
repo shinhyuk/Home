@@ -113,6 +113,15 @@
         <option value="all">전부 (아파트·오피스텔·연립다세대)</option>
       </select>
 
+      <label>희망 평형대 <span class="hint">선택 평형 기준으로 시세·단지를 계산합니다</span></label>
+      <select name="areaBand">
+        <option value="small">소형 (전용 60㎡ 이하 · ~24평)</option>
+        <option value="mid84" selected>국민평형 (전용 60~85㎡ · 25~34평)</option>
+        <option value="large">중대형 (전용 85~135㎡ · 34~50평)</option>
+        <option value="xlarge">대형 (전용 135㎡ 초과)</option>
+        <option value="any">상관없음 (전체)</option>
+      </select>
+
       <label>목표 지역 <span class="hint">동네·역 이름도 OK — 강남, 여의도, 잠실, 판교, 홍대…</span></label>
       <input type="text" name="region" id="regionInput" list="regionList" placeholder="예: 강남 / 여의도 / 서울 마포구" required>
       <datalist id="regionList"></datalist>

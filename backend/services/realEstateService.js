@@ -236,6 +236,46 @@ async function getRegionData(regionInput) {
 
 // ───────────────────────── 단지별 집계 (최근 6개월 아파트 매매) ─────────────────────────
 
+// 평형대 구간 (전용면적 ㎡)
+const AREA_BANDS = {
+  small: { min: 0, max: 60, label: '소형 · 전용 60㎡ 이하' },
+  mid84: { min: 60, max: 85, label: '국민평형 · 전용 60~85㎡' },
+  large: { min: 85, max: 135, label: '중대형 · 전용 85~135㎡' },
+  xlarge: { min: 135, max: 9999, label: '대형 · 전용 135㎡ 초과' },
+  any: { min: 0, max: 9999, label: '전체 평형' },
+};
+
+function inBand(area, bandKey) {
+  const b = AREA_BANDS[bandKey] || AREA_BANDS.any;
+  return area > b.min && area <= b.max;
+}
+
+// 평형대 기준 지역 통계 (최근 2개월 — 트랙/예산 판정용)
+async function getBandedStats(regionInput, bandKey = 'any') {
+  const region = resolveLawdCode(regionInput);
+  if (!region) return null;
+  const months = recentMonths(2);
+
+  const trades = (await collectMonths('apt-trade', region.code, months))
+    .filter((i) => !i.cancelled && i.dealAmount > 0 && i.area > 0 && inBand(i.area, bandKey));
+  const rents = (await collectMonths('apt-rent', region.code, months))
+    .filter((i) => i.monthlyRent === 0 && i.deposit > 0 && i.area > 0 && inBand(i.area, bandKey));
+
+  const amounts = trades.map((i) => i.dealAmount).sort((a, b) => a - b);
+  const perP = trades.map((i) => i.dealAmount / (i.area / PYEONG));
+  const deposits = rents.map((i) => i.deposit).sort((a, b) => a - b);
+
+  return {
+    band: bandKey,
+    label: (AREA_BANDS[bandKey] || AREA_BANDS.any).label,
+    count: trades.length,
+    medianPrice: median(amounts),
+    avgPerPyeong: perP.length ? Math.round(perP.reduce((a, b) => a + b, 0) / perP.length) : null,
+    jeonseCount: rents.length,
+    jeonseAvgDeposit: deposits.length ? Math.round(deposits.reduce((a, b) => a + b, 0) / deposits.length) : null,
+  };
+}
+
 // 수집 범위: 아파트 6개월, 오피스텔·연립다세대 2개월
 const COMPLEX_SOURCES = {
   'apt-trade': { label: '아파트', months: 6 },
@@ -243,7 +283,7 @@ const COMPLEX_SOURCES = {
   'rh-trade': { label: '연립다세대', months: 2 },
 };
 
-async function getComplexStats(regionInput, types = ['apt-trade']) {
+async function getComplexStats(regionInput, types = ['apt-trade'], bandKey = 'any') {
   const region = resolveLawdCode(regionInput);
   if (!region) return null;
 
@@ -253,7 +293,7 @@ async function getComplexStats(regionInput, types = ['apt-trade']) {
     if (!src) continue;
     const items = await collectMonths(type, region.code, recentMonths(src.months));
     for (const i of items) {
-      if (!i.cancelled && i.dealAmount > 0 && i.name) {
+      if (!i.cancelled && i.dealAmount > 0 && i.name && (bandKey === 'any' ? true : (i.area > 0 && inBand(i.area, bandKey)))) {
         valid.push({ ...i, typeLabel: src.label });
       }
     }
@@ -311,6 +351,8 @@ async function getAllRegionSummaries() {
 }
 
 module.exports = {
+  AREA_BANDS,
+  getBandedStats,
   getRegionSummary,
   getPriceTrend,
   getRegionData,

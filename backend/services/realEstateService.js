@@ -1,8 +1,20 @@
+const axios = require('axios');
 const molitApi = require('./molitApi');
 const cache = require('./cacheService');
 const { resolveLawdCode, listRegions } = require('../config/lawdCodes');
 
 const PYEONG = 3.3058; // 1평 = 3.3058㎡
+
+// GitHub Actions 수집기가 매일 data 브랜치에 저장한 정규화 데이터
+// (국토부 API가 해외 클라우드 IP를 403 차단 → 직접 호출의 1차 대안)
+const STATIC_DATA_BASE = process.env.STATIC_DATA_BASE
+  || 'https://raw.githubusercontent.com/shinhyuk/Home/data';
+
+async function fetchStatic(endpointKey, lawdCd, dealYmd) {
+  const url = `${STATIC_DATA_BASE}/${endpointKey}/${lawdCd}/${dealYmd}.json`;
+  const res = await axios.get(url, { timeout: 10000 });
+  return Array.isArray(res.data) ? res.data : null;
+}
 
 // ───────────────────────── 캐싱 레이어 ─────────────────────────
 
@@ -22,7 +34,17 @@ async function fetchMonthCached(endpointKey, lawdCd, dealYmd) {
   const cached = await cache.get(key);
   if (cached) return cached;
 
-  const items = await molitApi.fetchMonth(endpointKey, lawdCd, dealYmd);
+  // 1차: 수집된 정적 데이터 → 2차: 국토부 직접 호출 (로컬 개발 환경용)
+  let items = null;
+  try {
+    items = await fetchStatic(endpointKey, lawdCd, dealYmd);
+  } catch (e) {
+    // 404(미수집) 등 → 직접 호출로 폴백
+  }
+  if (!items) {
+    items = await molitApi.fetchMonth(endpointKey, lawdCd, dealYmd);
+  }
+
   await cache.set(key, items, ttlFor(dealYmd));
   return items;
 }

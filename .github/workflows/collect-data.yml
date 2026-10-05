@@ -1,0 +1,43 @@
+name: Collect MOLIT data
+
+# 국토부 실거래 데이터를 매일 수집해 data 브랜치에 저장
+# (해외 클라우드 IP 차단으로 Render가 직접 호출 불가 → Actions 러너가 수집)
+# data 브랜치는 생성 데이터 전용이라 매번 force-push로 전체 교체 (의도된 설계)
+on:
+  schedule:
+    - cron: '0 18 * * *'   # 매일 03:00 KST
+  workflow_dispatch:
+  push:
+    paths: ['backend/scripts/collect.js', '.github/workflows/collect-data.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-data
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install deps
+        run: cd backend && npm ci
+      - name: Collect
+        env:
+          MOLIT_API_KEY: ${{ secrets.MOLIT_API_KEY }}
+        run: node backend/scripts/collect.js out
+      - name: Publish to data branch
+        run: |
+          cd out
+          git init -b data
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add -A
+          git commit -m "data: $(date -u +%Y-%m-%dT%H:%M)Z"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data

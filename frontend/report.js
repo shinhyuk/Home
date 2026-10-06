@@ -176,6 +176,31 @@ function buildReportHTML() {
     ${trackRow(t.buy, t.buy ? `중위가 <b>${fmtMoney(t.buy.medianPrice)}</b> · 내 예산 ${fmtMoney(t.buy.budget)} (${t.buy.budgetRatio}%)<br><small>월 상환 ${fmtMoney(t.buy.monthlyPayment)}${t.buy.shortfall > 0 ? ' · 부족 ' + fmtMoney(t.buy.shortfall) : ''}</small>` : '')}
   </table>
 
+  ${(r.scenarios && r.scenarios.length) ? `
+  <h2>전략 시나리오 — 한 판 정리 <small>(상황 기반 추천도 순)</small></h2>
+  ${r.scenarios.map((sc) => `
+    <div class="summary" style="background:${sc.recommended ? '#f0f4ff' : '#f8fafc'};border-color:${sc.recommended ? '#d7e2fb' : 'var(--line)'};page-break-inside:avoid">
+      <div class="st" style="font-size:14px">${sc.recommended ? '⭐ 추천 — ' : sc.rank + '순위 — '}${esc(sc.icon)} ${esc(sc.title)} <small style="font-weight:400">적합도 ${sc.fit}</small></div>
+      <div style="margin:4px 0 8px">${esc(sc.oneLiner)}</div>
+      <ol style="margin:4px 0;padding-left:20px">${sc.steps.map((st) => `<li>${esc(st)}</li>`).join('')}</ol>
+      <div style="font-size:12px;color:var(--sub)">${sc.numbers.map((n) => `${esc(n.k)}: <b>${esc(n.v)}</b>`).join(' · ')}</div>
+      ${sc.candidates && sc.candidates.length ? `
+      <table style="margin-top:8px">
+        <tr><th>후보지</th><th class="num">중위가</th><th class="num">전세가율</th>${sc.candidates[0].gap != null ? '<th class="num">갭</th><th class="num">취득세 포함</th>' : '<th class="num">충족률</th>'}<th class="num">6개월</th></tr>
+        ${sc.candidates.map((c) => `<tr>
+          <td>${esc(c.name)}${c.affordable === false ? ' <small>(자금부족)</small>' : ''}</td>
+          <td class="num">${fmtMoney(c.medianPrice)}</td>
+          <td class="num">${c.jeonseRatio ?? '-'}%</td>
+          ${c.gap != null ? `<td class="num"><b>${fmtMoney(c.gap)}</b></td><td class="num">${fmtMoney(c.cost)}</td>` : `<td class="num"><b>${c.fitPct ?? '-'}%</b></td>`}
+          <td class="num">${c.changeRate > 0 ? '+' : ''}${c.changeRate ?? '-'}%</td>
+        </tr>`).join('')}
+      </table>` : ''}
+      <div class="two" style="margin-top:8px;font-size:12px">
+        <div><b style="color:var(--good)">장점</b><ul>${sc.pros.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+        <div><b style="color:var(--bad)">리스크</b><ul>${sc.cons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+      </div>
+    </div>`).join('')}` : ''}
+
   ${(cx.within?.length || cx.stretch?.length) ? `
   <h2>단지 추천 — ${esc(cx.regionName || '')} <small>(${esc(cx.basis || '')})</small></h2>
   ${cx.within?.length ? `

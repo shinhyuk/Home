@@ -1,4 +1,5 @@
 const realEstateService = require('./realEstateService');
+const scenarioService = require('./scenarioService');
 
 // 연봉 범위 → 대표값 (만원/년)
 const SALARY_RANGES = {
@@ -560,6 +561,12 @@ async function analyzeStrategy(userData) {
   const scores = calculateScores(userData, effRegion);
   const tracks = buildTracks(userData, norm, effRegion, scores);
   const recommendations = await buildRecommendations(userData, norm, effRegion, tracks.buy);
+
+  // 종합 전략 시나리오 (거주·투자·청약 조합)
+  let scenarios = [];
+  try {
+    scenarios = await scenarioService.buildScenarios(userData, norm, effRegion, tracks, maxLoanCapacity);
+  } catch (e) { console.warn('시나리오 생성 실패:', e.message); }
   const strategy = determineStrategy({ scores, priority: userData.priority, currentHome: userData.currentHome, regionData: effRegion });
   strategy.score = scores.overall;
 
@@ -584,6 +591,7 @@ async function analyzeStrategy(userData) {
 
   return {
     strategy,
+    scenarios,
     areaBasis,
     tracks,
     recommendations,

@@ -46,6 +46,12 @@
       <button type="button" class="btn-ghost" onclick="printReport()">🖨 인쇄 / PDF로 저장</button>
     </div>
 
+    <!-- 종합 전략 시나리오 -->
+    <div class="card span-all" id="scenarioCard" hidden>
+      <h2>🎯 전략 시나리오 — 한 판 정리 <span class="sub">당신 상황 기준 추천도 순</span></h2>
+      <div id="scenarioBox"></div>
+    </div>
+
     <!-- 메인 컬럼 -->
     <div class="col-main">
       <!-- 단지 추천 -->
@@ -247,6 +253,45 @@ async function initMap(cx) {
   if (pts.length) map.fitBounds(pts, { padding: [36, 36], maxZoom: 15 });
 }
 
+function renderScenarios(list) {
+  if (!list || !list.length) return;
+  document.getElementById('scenarioCard').hidden = false;
+  document.getElementById('scenarioBox').innerHTML = list.map((sc) => {
+    const candTable = sc.candidates && sc.candidates.length ? `
+      <div class="table-wrap"><table>
+        <tr><th>후보지</th><th>중위가</th><th>전세가율</th>${sc.candidates[0].gap != null ? '<th>갭(필요자금)</th><th>취득세 포함</th>' : '<th>예산충족률</th>'}<th>6개월</th></tr>
+        ${sc.candidates.map((c) => `<tr>
+          <td><b>${c.name}</b>${c.affordable === false ? ' <span class="badge hard">자금 부족</span>' : ''}</td>
+          <td>${fmtMoney(c.medianPrice)}</td>
+          <td>${c.jeonseRatio ?? '-'}%</td>
+          ${c.gap != null
+            ? `<td><b>${fmtMoney(c.gap)}</b></td><td>${fmtMoney(c.cost)}</td>`
+            : `<td><b>${c.fitPct ?? '-'}%</b></td>`}
+          <td class="${c.changeRate > 1 ? 'up' : c.changeRate < -1 ? 'down' : ''}">${c.changeRate > 0 ? '+' : ''}${c.changeRate ?? '-'}%</td>
+        </tr>`).join('')}
+      </table></div>` : '';
+
+    return `
+    <details class="scenario ${sc.recommended ? 'top' : ''}" ${sc.recommended ? 'open' : ''}>
+      <summary>
+        <span class="sc-rank">${sc.recommended ? '⭐ 추천' : sc.rank + '순위'}</span>
+        <span class="sc-title">${sc.icon} ${sc.title}</span>
+        <span class="sc-fit">적합도 ${sc.fit}</span>
+      </summary>
+      <div class="sc-body">
+        <p class="sc-one">${sc.oneLiner}</p>
+        <div class="sc-steps">${sc.steps.map((st, i) => `<div class="sc-step"><span class="sc-n">${i + 1}</span>${st}</div>`).join('')}</div>
+        <div class="kv-wrap">${sc.numbers.map((n) => kv(n.k, n.v)).join('')}</div>
+        ${candTable}
+        <div class="sc-pc">
+          <div><b style="color:var(--good)">👍 장점</b><ul>${sc.pros.map((x) => `<li>${x}</li>`).join('')}</ul></div>
+          <div><b style="color:var(--bad)">⚠ 리스크</b><ul>${sc.cons.map((x) => `<li>${x}</li>`).join('')}</ul></div>
+        </div>
+      </div>
+    </details>`;
+  }).join('');
+}
+
 function areaToPyeong(range) {
   if (!range) return '-';
   const p = (m2) => Math.round(m2 / 3.3058);
@@ -308,6 +353,8 @@ function render(r) {
   heroStats.push({ k: `${rd.name} 중위가${basisTag}`, v: fmtMoney((ab && ab.applied && r.tracks?.buy?.medianPrice) || rd.medianPrice) });
   document.getElementById('heroStats').innerHTML =
     heroStats.map((s) => `<div class="hs"><div class="v">${s.v}</div><div class="k">${s.k}</div></div>`).join('');
+
+  renderScenarios(r.scenarios);
 
   // ── 단지 추천 ──
   const rec = r.recommendations || {};

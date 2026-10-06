@@ -124,6 +124,18 @@
 
       <label>목표 지역 <span class="hint">동네·역 이름도 OK — 강남, 여의도, 잠실, 판교, 홍대…</span></label>
       <input type="text" name="region" id="regionInput" list="regionList" placeholder="예: 강남 / 여의도 / 서울 마포구" required>
+
+      <div class="row">
+        <div>
+          <label>내 직장 지역 <span class="hint">선택</span></label>
+          <input type="text" name="workRegion1" list="regionList" placeholder="예: 여의도">
+        </div>
+        <div>
+          <label>배우자 직장 지역 <span class="hint">선택</span></label>
+          <input type="text" name="workRegion2" list="regionList" placeholder="예: 삼성역">
+        </div>
+      </div>
+      <p class="muted">직장 지역을 입력하면 "직주근접 유지 + 투자 분리" 같은 조합 시나리오가 정교해집니다.</p>
       <datalist id="regionList"></datalist>
     </div>
 

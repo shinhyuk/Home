@@ -183,3 +183,24 @@ button.more-btn:hover { background: var(--brand-soft); }
 .btn-row { display: flex; gap: 10px; }
 .btn-row .btn-ghost { margin-top: 0; flex: 1; }
 @media print { .btn-row, .more-btn, .api-config, button.seg { display: none !important; } }
+
+/* ── 전략 시나리오 ── */
+details.scenario { border: 1.5px solid var(--line); border-radius: 12px; margin-bottom: 10px; background: var(--surface); overflow: hidden; }
+details.scenario.top { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+details.scenario summary { display: flex; align-items: center; gap: 10px; padding: 13px 16px; cursor: pointer; list-style: none; flex-wrap: wrap; }
+details.scenario summary::-webkit-details-marker { display: none; }
+details.scenario summary::after { content: '▾'; margin-left: auto; color: var(--faint); transition: transform .15s; }
+details.scenario[open] summary::after { transform: rotate(180deg); }
+.sc-rank { font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 999px; background: var(--line); color: var(--sub); white-space: nowrap; }
+details.scenario.top .sc-rank { background: var(--brand); color: #fff; }
+.sc-title { font-weight: 700; font-size: 15px; letter-spacing: -0.2px; }
+.sc-fit { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.sc-body { padding: 2px 16px 16px; border-top: 1px dashed var(--line); }
+.sc-one { font-size: 13.5px; color: var(--sub); margin: 12px 0; }
+.sc-steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.sc-step { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; background: var(--bg); border-radius: 8px; padding: 9px 12px; }
+.sc-n { flex: 0 0 22px; height: 22px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.sc-pc { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px; font-size: 13px; }
+.sc-pc > div { flex: 1; min-width: 240px; }
+.sc-pc ul { margin: 6px 0 0; padding-left: 18px; }
+.kv-wrap { margin: 4px 0; }

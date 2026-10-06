@@ -229,3 +229,11 @@ button.hero-cta {
 }
 button.hero-cta:hover { background: rgba(255,255,255,.24); }
 @media print { .tabs { display: none !important; } }
+
+/* ── 급매 사냥터 ── */
+.hot-chip {
+  display: inline-block; padding: 7px 13px; border-radius: 10px;
+  background: var(--bad-soft); border: 1.5px solid #f3c5c5;
+  font-size: 13px; color: #8f2f2f;
+}
+.hot-chip small { color: var(--sub); }

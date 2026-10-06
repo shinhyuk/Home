@@ -369,8 +369,38 @@
 
   <!-- ═══════════ 급매 ═══════════ -->
   <section class="tabview" id="tab-bargains">
+  <!-- 사냥터 추천 -->
   <div class="card">
-    <h2>🔥 급매 레이더 — 필터</h2>
+    <h2>🎯 급매 사냥터 추천 <span class="sub">반복 체결·동네 신호 기반 — 다음 급매가 나올 곳</span></h2>
+    <div class="row">
+      <div>
+        <label>예산 하한 (만원)</label>
+        <input type="number" id="huntMin" step="5000" value="70000">
+      </div>
+      <div>
+        <label>예산 상한 (만원)</label>
+        <input type="number" id="huntMax" step="5000" value="120000">
+      </div>
+      <div>
+        <label>지역</label>
+        <select id="huntScope">
+          <option value="seoul" selected>서울만</option>
+          <option value="metro">수도권</option>
+          <option value="all">전국</option>
+        </select>
+      </div>
+    </div>
+    <div id="huntBox" style="margin-top:14px"></div>
+    <p class="muted" style="margin-top:10px">
+      밴드 매칭 = 체결가 또는 정상가(단지 동평형 중위 환산)가 예산 안 ·
+      <span class="badge possible">표본↑</span>=동평형 10건 이상 ·
+      <span class="badge" style="background:var(--brand-soft);color:var(--brand)">반복⭐</span>=같은 단지 2회 이상 ·
+      실행: 단지 클릭(네이버) → 인근 중개사에 "X억 이하 나오면 연락" 선주문
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>🔥 급매 체결 전체 — 필터</h2>
     <div class="row">
       <div>
         <label>지역 범위</label>

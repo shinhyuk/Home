@@ -556,6 +556,7 @@ async function bgLoad() {
     if (!res.ok) throw new Error('404');
     BG_DATA = await res.json();
     bgRender();
+    huntRender();
     renderHome();
   } catch (e) {
     document.getElementById('bgPending').hidden = false;
@@ -614,6 +615,93 @@ function bgRender() {
 
 ['bgScope', 'bgMinDisc', 'bgMaxPrice', 'bgExDirect', 'bgExLow', 'bgSort'].forEach((id) =>
   document.getElementById(id).addEventListener('change', bgRender));
+
+/* ── 급매 사냥터 추천 ── */
+function bgNormalPrice(b) {
+  return b.medianPP ? Math.round(b.medianPP * b.area / 3.3058) : null;
+}
+
+function huntRender() {
+  if (!BG_DATA) return;
+  const min = Number(document.getElementById('huntMin').value) || 0;
+  const max = Number(document.getElementById('huntMax').value) || Infinity;
+  const scope = document.getElementById('huntScope').value;
+
+  // 밴드: 체결가 또는 정상가가 예산 안
+  const band = BG_DATA.items.filter((b) => {
+    if (!BG_SCOPES[scope](b.region)) return false;
+    const np = bgNormalPrice(b);
+    return (b.price >= min && b.price <= max) || (np && np >= min && np <= max);
+  });
+
+  // 단지별 그룹
+  const byComplex = new Map();
+  for (const b of band) {
+    const k = `${b.region}|${b.dong}|${b.name}`;
+    if (!byComplex.has(k)) byComplex.set(k, []);
+    byComplex.get(k).push(b);
+  }
+
+  // 동네 핫스팟: 한 동에서 2건 이상
+  const byDong = new Map();
+  for (const b of band) {
+    const k = `${b.region} ${b.dong}`;
+    if (!byDong.has(k)) byDong.set(k, new Set());
+    byDong.get(k).add(b.name);
+  }
+  const hotDongs = [...byDong.entries()]
+    .map(([dong, names]) => ({ dong, complexes: [...names], hits: band.filter((b) => `${b.region} ${b.dong}` === dong).length }))
+    .filter((d) => d.hits >= 2)
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, 8);
+
+  // 단지 추천: 점수 = 반복×3 + 표본신뢰 + 할인 깊이, 직거래-only 단지는 뒤로
+  const complexes = [...byComplex.entries()].map(([k, bs]) => {
+    const [region, dong, name] = k.split('|');
+    const best = bs.slice().sort((a, b) => a.discount - b.discount)[0];
+    const cleanHits = bs.filter((b) => !b.direct && (b.floor ?? 99) > 2).length;
+    const trusted = best.samples >= 10;
+    const score = bs.length * 3 + (trusted ? 2 : 0) + cleanHits * 2 + Math.min(10, -best.discount / 4);
+    return { region, dong, name, bs, best, hits: bs.length, cleanHits, trusted, score,
+      allDirect: bs.every((b) => b.direct) };
+  }).sort((a, b) => (a.allDirect === b.allDirect ? b.score - a.score : a.allDirect ? 1 : -1))
+    .slice(0, 12);
+
+  let html = '';
+  if (hotDongs.length) {
+    html += `<p style="font-size:13px;margin:0 0 6px"><b>🏘 동네 단위 신호</b> — 급매가 몰리는 곳 (중개사 선주문 1순위)</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">` +
+      hotDongs.map((d) => `<span class="hot-chip"><b>${d.dong}</b> ${d.hits}건 <small>(${d.complexes.slice(0, 3).join(', ')}${d.complexes.length > 3 ? ' 외' : ''})</small></span>`).join('') +
+      '</div>';
+  }
+
+  if (!complexes.length) {
+    html += '<p class="muted">이 예산·지역 조건에 해당하는 급매 체결이 아직 없습니다. 범위를 넓혀보세요.</p>';
+  } else {
+    html += `<div class="table-wrap"><table id="huntTable">
+      <tr><th>추천 단지</th><th>정상가 → 체결</th><th>최대 할인</th><th>신호</th></tr>` +
+      complexes.map((c, i) => {
+        const np = bgNormalPrice(c.best);
+        const badges =
+          (c.hits >= 2 ? '<span class="badge" style="background:var(--brand-soft);color:var(--brand)">반복⭐' + c.hits + '회</span>' : '') +
+          (c.trusted ? '<span class="badge possible">표본↑</span>' : '<span class="badge">표본' + c.best.samples + '</span>') +
+          (c.allDirect ? '<span class="badge hard">직거래만</span>' : '') +
+          ((c.best.floor ?? 99) <= 2 ? '<span class="badge tight">저층</span>' : '');
+        return `<tr class="${i >= 6 ? 'extra' : ''}">
+          <td><a href="${bgNaver(c.best)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><b style="border-bottom:1.5px dotted var(--brand)">${c.name}</b></a>
+            <span class="minor">${c.region} ${c.dong} · ${c.best.area}㎡ · ${c.best.date.slice(5)} 체결</span></td>
+          <td>${np ? fmtMoney(np) : '-'} → <b>${fmtMoney(c.best.price)}</b></td>
+          <td><b style="color:var(--bad)">${c.best.discount}%</b></td>
+          <td>${badges}</td>
+        </tr>`;
+      }).join('') + `</table></div>${moreBtn('huntTable', Math.max(0, complexes.length - 6))}`;
+  }
+
+  document.getElementById('huntBox').innerHTML = html;
+}
+
+['huntMin', 'huntMax', 'huntScope'].forEach((id) =>
+  document.getElementById(id).addEventListener('change', huntRender));
 
 /* ═══════════ 홈 대시보드 ═══════════ */
 async function renderHome() {

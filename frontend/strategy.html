@@ -40,6 +40,12 @@
       <div class="hero-stats" id="heroStats"></div>
     </div>
 
+    <!-- 리포트 저장 -->
+    <div class="span-all btn-row" style="margin-bottom:16px">
+      <button type="button" class="btn-ghost" onclick="downloadReportHTML()">📄 리포트 다운로드 (HTML)</button>
+      <button type="button" class="btn-ghost" onclick="printReport()">🖨 인쇄 / PDF로 저장</button>
+    </div>
+
     <!-- 메인 컬럼 -->
     <div class="col-main">
       <!-- 단지 추천 -->
@@ -117,6 +123,7 @@
 </div>
 
 <script src="api.js"></script>
+<script src="report.js"></script>
 <script>
 const FEASIBLE_LABEL = {
   possible: '가능', tight: '빠듯함', hard: '어려움',
@@ -139,6 +146,17 @@ function kv(label, value, big) {
 }
 
 let CX_REGION = '';
+
+function toggleExtra(btn, tableId) {
+  const tb = document.getElementById(tableId);
+  const on = tb.classList.toggle('show-extra');
+  btn.textContent = on ? '접기 ▲' : btn.dataset.more;
+}
+function moreBtn(tableId, hiddenCount) {
+  if (hiddenCount <= 0) return '';
+  const label = `더 보기 (+${hiddenCount}) ▼`;
+  return `<button type="button" class="more-btn" data-more="${label}" onclick="toggleExtra(this,'${tableId}')">${label}</button>`;
+}
 function naverLink(c) {
   return 'https://map.naver.com/p/search/' + encodeURIComponent(`${CX_REGION} ${c.dong} ${c.name}`);
 }
@@ -157,14 +175,17 @@ function renderRegionRecs(scopeKey) {
   document.getElementById('scopeBtns').innerHTML = Object.entries(SCOPES).map(([k, v]) =>
     `<button type="button" class="seg ${k === scopeKey ? 'active' : ''}" onclick="renderRegionRecs('${k}')">${v.label}</button>`).join('');
 
-  const rows = REGION_ALL.filter((x) => SCOPES[scopeKey].test(x.name)).slice(0, 8);
+  const rows = REGION_ALL.filter((x) => SCOPES[scopeKey].test(x.name));
   document.getElementById('regionEmpty').hidden = rows.length > 0;
+  const oldBtn = document.getElementById('regionMoreBtn');
+  if (oldBtn) oldBtn.remove();
+  document.getElementById('regionRecTable').classList.remove('show-extra');
   document.getElementById('regionRecTable').innerHTML = !rows.length ? '' :
     '<tr><th>지역</th><th>중위가</th><th>평당가</th><th>전세가율</th><th>6개월</th><th>예산충족률</th></tr>' +
-    rows.map((x) => {
+    rows.map((x, i) => {
       const trendCls = x.changeRate > 1 ? 'up' : x.changeRate < -1 ? 'down' : '';
       const fitCls = x.fit >= 120 ? 'style="color:var(--good);font-weight:700"' : x.fit >= 100 ? 'style="font-weight:700"' : 'style="color:var(--warn)"';
-      return `<tr>
+      return `<tr class="${i >= 8 ? 'extra' : ''}">
         <td><b>${x.name}</b></td>
         <td>${fmtMoney(x.medianPrice)}</td>
         <td>${fmtMoney(x.avgPerPyeong)}</td>
@@ -173,6 +194,11 @@ function renderRegionRecs(scopeKey) {
         <td ${fitCls}>${x.fit}%</td>
       </tr>`;
     }).join('');
+  if (rows.length > 8) {
+    const wrap = document.getElementById('regionRecTable').closest('.table-wrap');
+    wrap.insertAdjacentHTML('afterend',
+      `<span id="regionMoreBtn">${moreBtn('regionRecTable', rows.length - 8)}</span>`);
+  }
 }
 
 async function initMap(cx) {
@@ -238,6 +264,7 @@ async function run() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...input, saveResult: true }),
     });
+    window.REPORT_DATA = { r, input };
     render(r);
   } catch (err) {
     document.getElementById('loading').hidden = true;
@@ -290,8 +317,8 @@ function render(r) {
     CX_REGION = cx.regionName;
     document.getElementById('complexBasis').textContent = `${cx.regionName} · ${cx.basis}` + (r.areaBasis ? ` · ${r.areaBasis.label}` : '');
 
-    const rowOf = (c, extra) => `
-      <tr>
+    const rowOf = (c, extra, i, vis) => `
+      <tr class="${i >= vis ? 'extra' : ''}">
         <td><a href="${naverLink(c)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><b style="border-bottom:1.5px dotted var(--brand)">${c.name}</b></a> <span class="badge" style="margin-left:4px">${c.type || '아파트'}</span><span class="minor">${c.dong} · ${c.buildYear ? c.buildYear + '년' : ''} · ${areaToPyeong(c.areaRange)} · <a href="${naverLink(c)}" target="_blank" rel="noopener" style="color:var(--brand)">지도 🔗</a></span></td>
         <td>${c.count}건</td>
         <td><b>${fmtMoney(c.medianPrice)}</b><span class="minor">${fmtMoney(c.minPrice)}~${fmtMoney(c.maxPrice)}</span></td>
@@ -301,18 +328,20 @@ function render(r) {
 
     let html = '';
     if (cx.within?.length) {
-      html += `<p style="font-size:13px;margin:0 0 6px"><b style="color:var(--good)">지금 예산(${fmtMoney(rec.budget)}) 안에서</b></p>
-        <div class="table-wrap"><table>
+      html += `<p style="font-size:13px;margin:0 0 6px"><b style="color:var(--good)">지금 예산(${fmtMoney(rec.budget)}) 안에서 — ${cx.within.length}곳</b></p>
+        <div class="table-wrap"><table id="cxWithinT">
         <tr><th>단지</th><th>거래</th><th>중위가 (범위)</th><th>평당가</th></tr>
-        ${cx.within.map((c) => rowOf(c)).join('')}</table></div>`;
+        ${cx.within.map((c, i) => rowOf(c, undefined, i, 6)).join('')}</table></div>
+        ${moreBtn('cxWithinT', cx.within.length - 6)}`;
     } else {
       html += `<p class="muted">현재 예산 안에 드는 단지가 이 지역엔 없습니다. 아래 "다른 지역"을 참고하세요.</p>`;
     }
     if (cx.stretch?.length) {
-      html += `<p style="font-size:13px;margin:16px 0 6px"><b style="color:var(--warn)">조금 더 모으면 (예산 +30% 이내)</b></p>
-        <div class="table-wrap"><table>
+      html += `<p style="font-size:13px;margin:16px 0 6px"><b style="color:var(--warn)">조금 더 모으면 (예산 +30% 이내) — ${cx.stretch.length}곳</b></p>
+        <div class="table-wrap"><table id="cxStretchT">
         <tr><th>단지</th><th>거래</th><th>중위가 (범위)</th><th>평당가</th><th>부족분</th></tr>
-        ${cx.stretch.map((c) => rowOf(c, c.shortfall)).join('')}</table></div>`;
+        ${cx.stretch.map((c, i) => rowOf(c, c.shortfall, i, 4)).join('')}</table></div>
+        ${moreBtn('cxStretchT', cx.stretch.length - 4)}`;
     }
     document.getElementById('complexWithin').innerHTML = html;
     initMap(cx); // 비동기 — 좌표 준비되면 지도 표시

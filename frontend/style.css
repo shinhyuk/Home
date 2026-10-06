@@ -170,3 +170,16 @@ button.seg:hover { background: var(--bg); }
 button.seg.active { background: var(--brand); border-color: var(--brand); color: #fff; }
 /* Leaflet 팝업 톤 맞춤 */
 .leaflet-popup-content { font-family: inherit; font-size: 13px; line-height: 1.5; }
+
+/* ── 더 보기 ── */
+tr.extra { display: none; }
+table.show-extra tr.extra { display: table-row; }
+button.more-btn {
+  width: 100%; margin-top: 10px; padding: 9px;
+  background: var(--bg); color: var(--brand); border: 1.5px dashed var(--line);
+  border-radius: 10px; font-size: 13px; font-weight: 700;
+}
+button.more-btn:hover { background: var(--brand-soft); }
+.btn-row { display: flex; gap: 10px; }
+.btn-row .btn-ghost { margin-top: 0; flex: 1; }
+@media print { .btn-row, .more-btn, .api-config, button.seg { display: none !important; } }

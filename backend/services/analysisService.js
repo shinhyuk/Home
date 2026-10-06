@@ -484,12 +484,12 @@ async function buildRecommendations(userData, norm, regionData, buyTrack) {
     if (stats && stats.complexes.length) {
       const within = stats.complexes
         .filter((c) => c.medianPrice && c.medianPrice <= budget)
-        .slice(0, 6);
+        .slice(0, 20);
       const stretch = stats.complexes
         .filter((c) => c.medianPrice > budget && c.medianPrice <= budget * 1.3)
         .map((c) => ({ ...c, shortfall: c.medianPrice - budget }))
         .sort((a, b) => a.shortfall - b.shortfall)
-        .slice(0, 4);
+        .slice(0, 10);
       result.complexes = { regionName: stats.region, within, stretch, basis: '최근 6개월 실거래, 3건 이상 단지' };
     }
   } catch (e) {

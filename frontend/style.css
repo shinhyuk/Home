@@ -208,3 +208,24 @@ details.scenario.top .sc-rank { background: var(--brand); color: #fff; }
 button.mini-btn { width:auto; margin:0; padding:4px 10px; font-size:12px; border-radius:7px; background:var(--brand-soft); color:var(--brand); border:none; font-weight:700; }
 button.mini-btn:hover { background:var(--brand); color:#fff; }
 td .minor { display:block; }
+
+/* ── 올인원 탭 ── */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+button.tab-btn {
+  width: auto; margin: 0; padding: 9px 16px;
+  background: var(--surface); color: var(--sub);
+  border: 1.5px solid var(--line); border-radius: 999px;
+  font-size: 13.5px; font-weight: 700;
+}
+button.tab-btn:hover { background: var(--bg); }
+button.tab-btn.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+section.tabview { display: none; }
+section.tabview.active { display: block; }
+section.tabview.narrow { max-width: 640px; }
+button.hero-cta {
+  width: auto; margin-top: 18px; padding: 11px 18px;
+  background: rgba(255,255,255,.14); border: 1.5px solid rgba(255,255,255,.35);
+  color: #fff; font-size: 13.5px; border-radius: 10px;
+}
+button.hero-cta:hover { background: rgba(255,255,255,.24); }
+@media print { .tabs { display: none !important; } }

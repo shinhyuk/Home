@@ -23,6 +23,7 @@
       <button type="button" class="tab-btn" data-tab="home" onclick="switchTab('home')">📊 홈</button>
       <button type="button" class="tab-btn" data-tab="profile" onclick="switchTab('profile')">📝 내 정보</button>
       <button type="button" class="tab-btn" data-tab="analysis" onclick="switchTab('analysis')">🎯 분석</button>
+      <button type="button" class="tab-btn" data-tab="explore" onclick="switchTab('explore')">🧭 탐색</button>
       <button type="button" class="tab-btn" data-tab="complex" onclick="switchTab('complex')">🏢 단지</button>
       <button type="button" class="tab-btn" data-tab="radar" onclick="switchTab('radar')">🔭 레이더</button>
       <button type="button" class="tab-btn" data-tab="bargains" onclick="switchTab('bargains')">🔥 급매</button>
@@ -41,6 +42,7 @@
       <div class="card" style="margin-top:16px">
         <h2>로그인 없이 바로 볼 수 있는 것</h2>
         <div class="btn-row">
+          <button type="button" class="btn-ghost" onclick="switchTab('explore')">🧭 서울에서 살 수 있는 곳 찾기</button>
           <button type="button" class="btn-ghost" onclick="switchTab('complex')">🏢 단지 조회</button>
           <button type="button" class="btn-ghost" onclick="switchTab('radar')">🔭 전국 투자 레이더</button>
           <button type="button" class="btn-ghost" onclick="switchTab('bargains')">🔥 오늘의 급매 체결</button>
@@ -61,6 +63,13 @@
           <input name="q" placeholder="🏢 단지명 조회 — 예: 강변힐스테이트, 염창동 힐스테이트" autocomplete="off">
           <button type="submit" class="mini-btn" style="padding:10px 16px;font-size:13.5px">실거래 분석</button>
         </form>
+      </div>
+
+      <div class="card" style="padding:14px 18px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:13.5px"><b>🧭 드릴다운 탐색</b> <span style="color:var(--sub)">서울 전체에서 내 예산으로 가능한 평형·구·동·단지를 단계별로</span></div>
+          <button type="button" class="mini-btn" style="padding:8px 14px" onclick="switchTab('explore')">탐색 시작 →</button>
+        </div>
       </div>
 
       <div class="card hero" id="homeStrategy">
@@ -312,6 +321,59 @@
       </div>
       <button type="button" class="btn-ghost" onclick="switchTab('profile')">← 정보 수정하고 다시 분석</button>
     </div>
+  </div>
+  </section>
+
+  <!-- ═══════════ 드릴다운 탐색 ═══════════ -->
+  <section class="tabview" id="tab-explore">
+  <div class="card">
+    <h2>🧭 드릴다운 탐색 <span class="sub">범위 전체 → 구 → 동 → 단지 → 평형, 내 예산 기준으로 점점 좁혀가기</span></h2>
+    <div class="map-ctl">
+      <select id="exScope">
+        <option value="seoul" selected>서울 전체</option>
+        <option value="metro">수도권 (서울·경기·인천)</option>
+        <option value="all">전국</option>
+      </select>
+      <select id="exArea">
+        <option value="49">전용 49㎡ (약 20평형)</option>
+        <option value="59" selected>전용 59㎡ (약 24평형)</option>
+        <option value="74">전용 74㎡ (약 30평형)</option>
+        <option value="84">전용 84㎡ (약 34평형)</option>
+        <option value="101">전용 101㎡ (약 40평형)</option>
+        <option value="114">전용 114㎡ (약 46평형)</option>
+        <option value="custom">직접 입력…</option>
+      </select>
+      <input id="exAreaCustom" type="number" min="20" max="300" step="1" placeholder="전용 ㎡" style="width:110px;flex:0 0 110px" hidden>
+      <label class="chk"><input type="checkbox" id="exOnlyOk"> 구매 가능만</label>
+      <button type="button" class="mini-btn" style="padding:10px 16px;font-size:13.5px" onclick="exStart()">탐색 →</button>
+    </div>
+    <p class="muted" style="margin:8px 0 0">평형은 전용면적 ±4㎡로 매칭 (59 → 55~63㎡). 판정은 내 정보(자금·연소득·보유상태) + 2026.10 대출 규제 기준.</p>
+  </div>
+
+  <div id="exBody" hidden>
+    <div class="card" style="padding:14px 18px">
+      <div class="crumbs" id="exCrumbs"></div>
+      <div id="exHero" style="margin-top:10px"></div>
+    </div>
+    <div class="layout">
+      <div class="col-main">
+        <div class="card">
+          <h2 id="exMapTitle">지도</h2>
+          <div id="exMap" class="cx-map"></div>
+          <div class="map-legend" id="exLegend"></div>
+        </div>
+      </div>
+      <div class="col-side">
+        <div class="card">
+          <h2 id="exListTitle">목록</h2>
+          <div id="exList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="exEmpty" class="card" style="text-align:center;padding:40px 20px">
+    <p style="font-size:15px;margin:0 0 6px">평형을 고르고 <b>탐색</b>을 누르면 범위 전체를 한 번에 집계합니다.</p>
+    <p class="muted">예: 서울 전체에서 전용 59㎡를 내 예산으로 살 수 있는 구 → 동 → 단지 순으로 내려갑니다.</p>
   </div>
   </section>
 

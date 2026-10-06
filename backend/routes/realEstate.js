@@ -115,6 +115,18 @@ router.post('/complex/map', async (req, res) => {
   }
 });
 
+// POST /api/real-estate/complex/explore  { scope: seoul|metro|all, area: 59, tol, profile }
+//   범위 안 모든 시군구를 평형 기준으로 집계 (드릴다운 1단계)
+router.post('/complex/explore', async (req, res) => {
+  try {
+    const data = await complexService.exploreRegions(req.body || {});
+    res.json(data);
+  } catch (error) {
+    console.error('탐색 집계 오류:', error);
+    res.status(500).json({ error: '탐색 집계 실패', detail: error.message });
+  }
+});
+
 // POST /api/real-estate/geo/batch - 단지 좌표 조회 (최대 20건, 캐시됨)
 router.post('/geo/batch', async (req, res) => {
   try {

@@ -207,29 +207,30 @@ function basisPrice(v) {
 }
 
 // ───────────────────────── 지도용 단지 목록 ─────────────────────────
-// opts: { region, dong?, band, profile, limit }
-async function mapComplexes(opts) {
-  const r = resolveLawdCode(opts.region || '');
-  if (!r) return { error: `지역을 찾을 수 없습니다: ${opts.region}` };
-  let data;
-  try { data = await loadRegion(r.code); } catch (e) { return { error: '단지 데이터가 아직 생성되지 않았습니다 (다음 수집 사이클에 생성)' }; }
 
-  const cap = profileCapital(opts.profile);
-  const band = opts.band || 'any';
-  const list = opts.dong ? data.complexes.filter((c) => c.dong === opts.dong) : data.complexes;
+// 지역 파일 → 평형(band 또는 전용면적 area±tol) 기준 단지별 판정 목록
+function judgeList(data, { band = 'any', area = null, tol = 4, cap = null, dong = null }) {
+  const list = dong ? data.complexes.filter((c) => c.dong === dong) : data.complexes;
   const ppByDong = {};
-
-  const items = list.map((c) => {
-    const bk = pickBucket(c, band);
-    if (!bk && band !== 'any') return null;
+  const items = [];
+  for (const c of list) {
+    let bk = null;
+    if (area != null) {
+      const nb = nearestBucket(c.buckets, area, tol);
+      if (!nb) continue;
+      bk = { key: nb.key, v: nb.v };
+    } else {
+      bk = pickBucket(c, band);
+      if (!bk && band !== 'any') continue;
+    }
     const bp = bk ? basisPrice(bk.v) : { price: c.medianPrice, pp: c.pp, basis: '12m', n: c.count };
     const price = bp.price;
-    if (!price) return null;
+    if (!price) continue;
     const pk = `${c.dong}|${bk ? Math.round(bk.v.area / 5) : ''}`;
     if (!(pk in ppByDong)) ppByDong[pk] = dongMedianPP(data.complexes, c.dong, bk ? bk.v.area : null);
     const judge = judgePrice(price, cap);
     const sc = scoreComplex({ ...c, pp: bp.pp, count: bk ? bk.v.count : c.count }, price, judge, { dongPP: ppByDong[pk] });
-    return {
+    items.push({
       name: c.name, dong: c.dong, jibun: c.jibun, buildYear: c.buildYear,
       lat: c.lat ?? null, lon: c.lon ?? null, geo: c.geo || null,
       count: c.count, bargains: c.bargains || 0, trend: c.trend,
@@ -239,17 +240,91 @@ async function mapComplexes(opts) {
       last: bk ? bk.v.last : c.last,
       status: judge.status, budget: judge.budget, monthly: judge.monthly, shortfall: judge.shortfall, ratio: judge.ratio,
       score: sc.score, label: sc.label, why: sc.why, neg: sc.neg,
-    };
-  }).filter(Boolean);
-
+    });
+  }
   items.sort((a, b) => b.score - a.score || b.count - a.count);
+  return items;
+}
+
+// opts: { region, dong?, band | area(+tol), profile, limit }
+async function mapComplexes(opts) {
+  const r = resolveLawdCode(opts.region || '');
+  if (!r) return { error: `지역을 찾을 수 없습니다: ${opts.region}` };
+  let data;
+  try { data = await loadRegion(r.code); } catch (e) { return { error: '단지 데이터가 아직 생성되지 않았습니다 (다음 수집 사이클에 생성)' }; }
+
+  const cap = profileCapital(opts.profile);
+  const area = Number(opts.area) > 0 ? Number(opts.area) : null;
+  const band = area ? 'any' : (opts.band || 'any');
+  const items = judgeList(data, { band, area, tol: Number(opts.tol) || 4, cap, dong: opts.dong || null });
   const limit = opts.limit || 400;
   return {
-    region: data.region, code: r.code, band, generatedAt: data.generatedAt,
+    region: data.region, code: r.code, band, area, generatedAt: data.generatedAt,
     total: items.length,
     located: items.filter((i) => i.lat != null).length,
     capital: cap ? { own: cap.own, income: cap.income } : null,
     items: items.slice(0, limit),
+  };
+}
+
+// ───────────────────────── 드릴다운 탐색: 범위 전체 지역 집계 ─────────────────────────
+const SCOPE_TEST = {
+  seoul: (code) => code.startsWith('11'),
+  metro: (code) => /^(11|41|28)/.test(code),
+  all: () => true,
+};
+const medianOf = (arr) => { if (!arr.length) return null; const s = arr.slice().sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2); };
+
+async function exploreRegions({ scope = 'seoul', area = 59, tol = 4, band = null, profile }) {
+  const test = SCOPE_TEST[scope] || SCOPE_TEST.seoul;
+  const codes = Object.keys(nameByCode).filter(test);
+  const cap = profileCapital(profile);
+  const a = Number(area) > 0 ? Number(area) : null;
+
+  // 지역 파일 병렬 로드 (동시 8개)
+  const results = [];
+  for (let i = 0; i < codes.length; i += 8) {
+    const chunk = codes.slice(i, i + 8);
+    const got = await Promise.all(chunk.map(async (code) => {
+      try { return { code, data: await loadRegion(code) }; } catch (e) { return { code, data: null }; }
+    }));
+    results.push(...got);
+  }
+
+  const regions = [];
+  let missing = 0;
+  for (const { code, data } of results) {
+    if (!data) { missing++; continue; }
+    const items = judgeList(data, { band: band || 'any', area: a, tol, cap });
+    if (!items.length) continue;
+    const possible = items.filter((i) => i.status === 'possible');
+    const tight = items.filter((i) => i.status === 'tight');
+    const hard = items.filter((i) => i.status === 'hard');
+    const located = items.filter((i) => i.lat != null);
+    const dongs = new Set(items.map((i) => i.dong));
+    const posDongs = new Set(possible.map((i) => i.dong));
+    regions.push({
+      code, name: data.region,
+      total: items.length, possible: possible.length, tight: tight.length, hard: hard.length,
+      possibleRate: Math.round((possible.length / items.length) * 100),
+      dongs: dongs.size, possibleDongs: posDongs.size,
+      medianPrice: medianOf(items.map((i) => i.price)),
+      possibleMedian: medianOf(possible.map((i) => i.price)),
+      minPossible: possible.length ? Math.min(...possible.map((i) => i.price)) : null,
+      pp: medianOf(items.map((i) => i.pp).filter(Boolean)),
+      bestScore: possible.length ? possible[0].score : (items[0]?.score ?? null),
+      top: (possible.length ? possible : items).slice(0, 3).map((i) => ({ name: i.name, dong: i.dong, price: i.price, score: i.score })),
+      lat: located.length ? located.reduce((s, i) => s + i.lat, 0) / located.length : null,
+      lon: located.length ? located.reduce((s, i) => s + i.lon, 0) / located.length : null,
+    });
+  }
+  regions.sort((a, b) => b.possible - a.possible || b.total - a.total);
+  const sum = (k) => regions.reduce((s, r) => s + r[k], 0);
+  return {
+    scope, area: a, band: band || null, tol,
+    capital: cap ? { own: cap.own, income: cap.income } : null,
+    totals: { regions: regions.length, complexes: sum('total'), possible: sum('possible'), tight: sum('tight'), hard: sum('hard'), missing },
+    regions,
   };
 }
 
@@ -379,4 +454,4 @@ async function complexDetail({ region, dong, name, profile }) {
   };
 }
 
-module.exports = { searchComplexes, mapComplexes, complexDetail, judgePrice, scoreComplex };
+module.exports = { searchComplexes, mapComplexes, exploreRegions, complexDetail, judgePrice, scoreComplex };

@@ -27,7 +27,7 @@ function profileComplete(p) {
 }
 
 /* ═══════════ 탭 ═══════════ */
-const TABS = ['home', 'profile', 'analysis', 'complex', 'radar', 'bargains'];
+const TABS = ['home', 'profile', 'analysis', 'explore', 'complex', 'radar', 'bargains'];
 const tabInited = {};
 
 function switchTab(name) {
@@ -44,6 +44,7 @@ function switchTab(name) {
   if (name === 'radar' && !tabInited.radar) { tabInited.radar = true; rdScan(); }
   if (name === 'bargains' && !tabInited.bargains) { tabInited.bargains = true; bgLoad(); }
   if (name === 'complex' && !tabInited.complex) { tabInited.complex = true; cxInit(); }
+  if (name === 'explore' && !tabInited.explore) { tabInited.explore = true; exInit(); }
   if (name === 'home') renderHome();
 }
 
@@ -416,12 +417,12 @@ function profileForApi() {
   if (!p || !p.salaryAmount) return null;
   return { salaryAmount: p.salaryAmount, savingsAmount: p.savingsAmount, jeonseDeposit: p.jeonseDeposit, currentHome: p.currentHome, family: p.family, childrenCount: p.childrenCount };
 }
-async function cxFetchMap({ region, band, dong }) {
-  const key = `${region}|${band}|${dong || ''}|${JSON.stringify(profileForApi())}`;
+async function cxFetchMap({ region, band, dong, area }) {
+  const key = `${region}|${band}|${area || ''}|${dong || ''}|${JSON.stringify(profileForApi())}`;
   if (CX_MAP_CACHE[key]) return CX_MAP_CACHE[key];
   const data = await apiFetch('/api/real-estate/complex/map', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ region, band, dong, profile: profileForApi(), limit: 500 }),
+    body: JSON.stringify({ region, band, dong, area, profile: profileForApi(), limit: 600 }),
   });
   CX_MAP_CACHE[key] = data;
   return data;
@@ -478,7 +479,13 @@ async function cxOpen(regionEnc, dongEnc, nameEnc) {
 }
 
 let CX_DETAIL = null;
+let CX_PREFER_AREA = null; // 탐색에서 넘어올 때 우선 선택할 전용면적
 function cxDefaultUnit(d) {
+  if (CX_PREFER_AREA) {
+    const near = d.units.map((u) => ({ u, dd: Math.abs(u.area - CX_PREFER_AREA) })).filter((x) => x.dd <= 4).sort((a, b) => a.dd - b.dd)[0];
+    CX_PREFER_AREA = null;
+    if (near) return near.u.key;
+  }
   const band = (getProfile() || {}).areaBand;
   if (band && band !== 'any') {
     const inBand = d.units.filter((u) => {
@@ -708,6 +715,212 @@ async function cxMapLoad(opts = {}) {
 }
 ['cxMapBand', 'cxMapOnlyOk'].forEach((id) => document.getElementById(id).addEventListener('change', () => cxMapLoad()));
 document.getElementById('cxMapRegion').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); cxMapLoad(); } });
+
+/* ═══════════ 드릴다운 탐색 (범위 → 구 → 동 → 단지) ═══════════ */
+const EX = { level: 0, scope: 'seoul', area: 59, regions: null, region: null, regionData: null, dong: null };
+const SCOPE_NAME = { seoul: '서울 전체', metro: '수도권', all: '전국' };
+const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+
+function exInit() {
+  const p = getProfile() || {};
+  const sel = document.getElementById('exArea');
+  const prefer = p.areaBand === 'small' ? '59' : p.areaBand === 'large' ? '101' : p.areaBand === 'xlarge' ? '114' : p.areaBand === 'mid84' ? '84' : '59';
+  sel.value = prefer;
+  sel.addEventListener('change', () => { document.getElementById('exAreaCustom').hidden = sel.value !== 'custom'; });
+  document.getElementById('exOnlyOk').addEventListener('change', () => exRender());
+  if (profileComplete(p)) exStart();
+}
+function exAreaValue() {
+  const v = document.getElementById('exArea').value;
+  if (v === 'custom') return Number(document.getElementById('exAreaCustom').value) || 59;
+  return Number(v);
+}
+
+async function exStart() {
+  EX.scope = document.getElementById('exScope').value;
+  EX.area = exAreaValue();
+  EX.level = 0; EX.region = null; EX.regionData = null; EX.dong = null;
+  document.getElementById('exEmpty').hidden = true;
+  document.getElementById('exBody').hidden = false;
+  document.getElementById('exHero').innerHTML = '<p class="muted">범위 전체를 집계하는 중… (처음 한 번은 10초쯤 걸릴 수 있습니다)</p>';
+  document.getElementById('exList').innerHTML = '';
+  try {
+    EX.regions = await apiFetch('/api/real-estate/complex/explore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: EX.scope, area: EX.area, profile: profileForApi() }),
+    });
+    exRender();
+  } catch (e) {
+    document.getElementById('exHero').innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
+  }
+}
+
+async function exGoRegion(code, name) {
+  EX.level = 1; EX.region = { code, name }; EX.dong = null;
+  document.getElementById('exHero').innerHTML = `<p class="muted">${esc(name)} 단지를 불러오는 중…</p>`;
+  try {
+    EX.regionData = await cxFetchMap({ region: name, area: EX.area });
+    exRender();
+  } catch (e) {
+    document.getElementById('exHero').innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
+  }
+}
+function exGoDong(dong) { EX.level = 2; EX.dong = dong; exRender(); }
+function exUp(level) {
+  EX.level = level;
+  if (level === 0) { EX.region = null; EX.regionData = null; EX.dong = null; }
+  if (level === 1) EX.dong = null;
+  exRender();
+}
+function exOpenComplex(regionEnc, dongEnc, nameEnc) {
+  CX_PREFER_AREA = EX.area;
+  cxOpen(regionEnc, dongEnc, nameEnc);
+}
+
+function exCrumbs() {
+  const parts = [{ label: `${SCOPE_NAME[EX.scope]} · 전용 ${EX.area}㎡`, level: 0 }];
+  if (EX.region) parts.push({ label: EX.region.name.replace(/^서울 /, ''), level: 1 });
+  if (EX.dong) parts.push({ label: EX.dong, level: 2 });
+  document.getElementById('exCrumbs').innerHTML = parts.map((p, i) =>
+    `${i ? '<span class="sep">›</span>' : ''}<button type="button" class="${p.level === EX.level ? 'cur' : ''}" onclick="exUp(${p.level})">${esc(p.label)}</button>`).join('')
+    + (EX.level < 2 ? `<span class="muted" style="margin-left:6px">${EX.level === 0 ? '구를 누르면 동으로' : '동을 누르면 단지로'}</span>` : '<span class="muted" style="margin-left:6px">단지를 누르면 평형별 상세</span>');
+}
+
+function exStats(list) {
+  const hasCap = Boolean(EX.regions && EX.regions.capital);
+  const n = list.length, ok = list.filter((i) => i.status === 'possible').length, tg = list.filter((i) => i.status === 'tight').length;
+  const okP = list.filter((i) => i.status === 'possible').map((i) => i.price);
+  return `<div class="ex-stats">
+    <div class="st"><div class="v">${n}</div><div class="k">전용 ${EX.area}㎡ 단지</div></div>
+    ${hasCap ? `<div class="st ok"><div class="v">${ok}</div><div class="k">구매 가능 (${pct(ok, n)}%)</div></div>
+    <div class="st"><div class="v" style="color:var(--warn)">${tg}</div><div class="k">빠듯함</div></div>
+    <div class="st"><div class="v">${okP.length ? fmtMoney(Math.min(...okP)) : '-'}</div><div class="k">가능 최저가</div></div>
+    <div class="st"><div class="v">${fmtMoney(EX.regions.capital.own)}</div><div class="k">내 자기자금 (대출은 가격별 산정)</div></div>`
+    : `<div class="st"><div class="v">-</div><div class="k"><a href="#profile" onclick="switchTab('profile');return false">내 정보</a> 입력 시 가능 여부 표시</div></div>`}
+  </div>`;
+}
+
+function exRender() {
+  if (!EX.regions) return;
+  exCrumbs();
+  const onlyOk = document.getElementById('exOnlyOk').checked;
+  if (EX.level === 0) return exRenderRegions(onlyOk);
+  if (!EX.regionData) return;
+  const items = EX.level === 2 ? EX.regionData.items.filter((i) => i.dong === EX.dong) : EX.regionData.items;
+  if (EX.level === 1) exRenderDongs(items, onlyOk);
+  else exRenderComplexes(items, onlyOk);
+}
+
+/* ── 0단계: 구 ── */
+function exRenderRegions(onlyOk) {
+  const d = EX.regions;
+  const hasCap = Boolean(d.capital);
+  let rows = d.regions.slice();
+  if (onlyOk && hasCap) rows = rows.filter((r) => r.possible > 0);
+  const t = d.totals;
+  document.getElementById('exHero').innerHTML = `<div class="ex-stats">
+    <div class="st"><div class="v">${t.regions}</div><div class="k">${SCOPE_NAME[EX.scope]} 시군구</div></div>
+    <div class="st"><div class="v">${t.complexes.toLocaleString()}</div><div class="k">전용 ${EX.area}㎡ 거래 단지 (1년)</div></div>
+    ${hasCap ? `<div class="st ok"><div class="v">${t.possible.toLocaleString()}</div><div class="k">구매 가능 단지 (${pct(t.possible, t.complexes)}%)</div></div>
+    <div class="st"><div class="v">${rows.filter((r) => r.possible > 0).length}</div><div class="k">가능한 시군구</div></div>
+    <div class="st"><div class="v">${fmtMoney(d.capital.own)}</div><div class="k">내 자기자금 · 연소득 ${fmtMoney(d.capital.income)}</div></div>`
+    : `<div class="st"><div class="v">-</div><div class="k"><a href="#profile" onclick="switchTab('profile');return false">내 정보</a>를 입력하면 가능/빠듯/초과가 표시됩니다</div></div>`}
+  </div>${t.missing ? `<p class="muted" style="margin:6px 0 0">단지 데이터 없는 지역 ${t.missing}개 (다음 수집 때 생성)</p>` : ''}`;
+
+  document.getElementById('exMapTitle').innerHTML = `🗺 ${SCOPE_NAME[EX.scope]} — 구별 구매 가능 단지 수 <span class="sub">원 크기 = 가능 단지 수 · 색 = 가능 비율</span>`;
+  exDrawRegionMap(rows, hasCap);
+
+  document.getElementById('exListTitle').innerHTML = `📍 시군구별 집계 <span class="sub">가능 많은 순 · 누르면 동 단위로</span>`;
+  document.getElementById('exList').innerHTML = `<div class="table-wrap"><table id="exRegT">
+    <tr><th>시군구</th><th>${hasCap ? '가능 / 전체' : '단지'}</th><th>${hasCap ? '가능 중위가' : '중위가'}</th><th>최저${hasCap ? ' 가능' : ''}가</th></tr>
+    ${rows.map((r, i) => `<tr class="ex-row ${i >= 14 ? 'extra' : ''}" onclick="exGoRegion('${r.code}','${esc(r.name)}')">
+      <td><b>${esc(r.name.replace(/^(서울|경기|인천) /, ''))}</b><span class="minor">${esc(r.name.split(' ')[0])} · ${hasCap ? r.possibleDongs + '/' : ''}${r.dongs}개 동 · ${r.top.slice(0, 2).map((x) => esc(x.name)).join(', ')}</span></td>
+      <td>${hasCap ? `<b style="color:var(--good)">${r.possible}</b> / ${r.total}<div class="bar"><i style="width:${r.possibleRate}%"></i><i class="t" style="left:${r.possibleRate}%;width:${pct(r.tight, r.total)}%"></i></div>` : `<b>${r.total}</b>`}</td>
+      <td><b>${fmtMoney(hasCap ? r.possibleMedian : r.medianPrice)}</b><span class="minor">평당 ${fmtMoney(r.pp)}</span></td>
+      <td>${fmtMoney(hasCap ? r.minPossible : null) || '-'}</td>
+    </tr>`).join('')}
+  </table></div>${moreBtn('exRegT', rows.length - 14)}`;
+}
+
+function exDrawRegionMap(rows, hasCap) {
+  if (typeof L === 'undefined') return;
+  const elId = 'exMap';
+  if (MAPS[elId]) { MAPS[elId].remove(); delete MAPS[elId]; }
+  const map = L.map(document.getElementById(elId), { scrollWheelZoom: false });
+  MAPS[elId] = map;
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM', maxZoom: 18 }).addTo(map);
+  const pts = [];
+  rows.filter((r) => r.lat != null).forEach((r) => {
+    const n = hasCap ? r.possible : r.total;
+    const rate = hasCap ? r.possibleRate : 50;
+    const color = !hasCap ? '#1d4ed8' : rate >= 70 ? '#0e9f6e' : rate >= 40 ? '#c27803' : '#d64545';
+    const m = L.circleMarker([r.lat, r.lon], { radius: Math.min(34, 6 + Math.sqrt(n) * 2.2), color: '#fff', weight: 1.5, fillColor: color, fillOpacity: .8 }).addTo(map);
+    m.bindTooltip(`<b>${esc(r.name.replace(/^(서울|경기|인천) /, ''))}</b><br>${hasCap ? `가능 ${r.possible} / ${r.total} (${r.possibleRate}%)` : `단지 ${r.total}`}<br>중위 ${fmtMoney(hasCap ? r.possibleMedian : r.medianPrice)}`, { className: 'ex-tip', direction: 'top' });
+    m.on('click', () => exGoRegion(r.code, r.name));
+    pts.push([r.lat, r.lon]);
+  });
+  if (pts.length) map.fitBounds(pts, { padding: [28, 28], maxZoom: 12 }); else map.setView([37.5665, 126.978], 11);
+  document.getElementById('exLegend').innerHTML = hasCap
+    ? `<span><i class="dot" style="background:#0e9f6e"></i>가능 70%↑</span><span><i class="dot" style="background:#c27803"></i>40~70%</span><span><i class="dot" style="background:#d64545"></i>40% 미만</span><span>원 클릭 → 그 구의 동·단지</span>`
+    : `<span>원 크기 = 단지 수 · 클릭 → 동·단지</span>`;
+}
+
+/* ── 1단계: 동 ── */
+function exRenderDongs(items, onlyOk) {
+  const hasCap = Boolean(EX.regionData.capital);
+  const byDong = new Map();
+  for (const i of items) { if (!byDong.has(i.dong)) byDong.set(i.dong, []); byDong.get(i.dong).push(i); }
+  let rows = [...byDong.entries()].map(([dong, list]) => {
+    const ok = list.filter((i) => i.status === 'possible'), tg = list.filter((i) => i.status === 'tight');
+    const okP = ok.map((i) => i.price);
+    const best = (ok.length ? ok : list)[0];
+    return { dong, total: list.length, possible: ok.length, tight: tg.length, rate: pct(ok.length, list.length),
+      median: medianArr((hasCap && ok.length ? ok : list).map((i) => i.price)), min: okP.length ? Math.min(...okP) : null, best };
+  }).sort((a, b) => b.possible - a.possible || b.total - a.total);
+  if (onlyOk && hasCap) rows = rows.filter((r) => r.possible > 0);
+
+  document.getElementById('exHero').innerHTML = exStats(items);
+  document.getElementById('exMapTitle').innerHTML = `🗺 ${esc(EX.region.name)} — 전용 ${EX.area}㎡ 단지 ${items.length}개 <span class="sub">핀 클릭 → 상세 · 색 = 판정</span>`;
+  drawComplexMap('exMap', { ...EX.regionData, items }, { onlyOk, legendId: 'exLegend' });
+
+  document.getElementById('exListTitle').innerHTML = `🏘 동별 집계 <span class="sub">누르면 그 동 단지만</span>`;
+  document.getElementById('exList').innerHTML = `<div class="table-wrap"><table id="exDongT">
+    <tr><th>동</th><th>${hasCap ? '가능 / 전체' : '단지'}</th><th>중위가</th><th>대표 단지</th></tr>
+    ${rows.map((r, i) => `<tr class="ex-row ${i >= 12 ? 'extra' : ''}" onclick="exGoDong('${esc(r.dong)}')">
+      <td><b>${esc(r.dong)}</b>${r.min ? `<span class="minor">최저 가능 ${fmtMoney(r.min)}</span>` : ''}</td>
+      <td>${hasCap ? `<b style="color:var(--good)">${r.possible}</b> / ${r.total}<div class="bar"><i style="width:${r.rate}%"></i><i class="t" style="left:${r.rate}%;width:${pct(r.tight, r.total)}%"></i></div>` : `<b>${r.total}</b>`}</td>
+      <td><b>${fmtMoney(r.median)}</b></td>
+      <td style="white-space:normal;max-width:150px;font-size:12.5px">${esc(r.best.name)}<span class="minor">${fmtMoney(r.best.price)} · ${r.best.score}점</span></td>
+    </tr>`).join('')}
+  </table></div>${moreBtn('exDongT', rows.length - 12)}
+  <p style="font-size:13px;margin:14px 0 6px"><b>⭐ ${esc(EX.region.name.replace(/^(서울|경기|인천) /, ''))} 추천 TOP</b></p>
+  ${exComplexTable(items.filter((i) => !onlyOk || i.status !== 'hard').slice(0, 8), 'exTopT', 8)}`;
+}
+function medianArr(a) { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2); }
+
+/* ── 2단계: 단지 ── */
+function exRenderComplexes(items, onlyOk) {
+  const rows = onlyOk ? items.filter((i) => i.status === 'possible' || i.status === 'tight') : items;
+  document.getElementById('exHero').innerHTML = exStats(items);
+  document.getElementById('exMapTitle').innerHTML = `🗺 ${esc(EX.region.name)} ${esc(EX.dong)} — 전용 ${EX.area}㎡ 단지 ${items.length}개`;
+  drawComplexMap('exMap', { ...EX.regionData, items }, { onlyOk, legendId: 'exLegend' });
+  document.getElementById('exListTitle').innerHTML = `🏢 ${esc(EX.dong)} 단지 순위 <span class="sub">누르면 평형별 상세 (전용 ${EX.area}㎡ 자동 선택)</span>`;
+  document.getElementById('exList').innerHTML = exComplexTable(rows, 'exCxT', 12);
+}
+
+function exComplexTable(rows, tid, n) {
+  if (!rows.length) return '<p class="muted">조건에 맞는 단지가 없습니다.</p>';
+  const region = EX.region.name;
+  return `<div class="table-wrap"><table id="${tid}">
+    <tr><th>단지</th><th>전용</th><th>중위가</th><th>판정</th></tr>
+    ${rows.map((c, i) => `<tr class="ex-row ${i >= n ? 'extra' : ''}" onclick="exOpenComplex('${encodeURIComponent(region)}','${encodeURIComponent(c.dong)}','${encodeURIComponent(c.name)}')">
+      <td><b>${esc(c.name)}</b><span class="minor">${esc(c.dong)} · ${c.buildYear ? c.buildYear + '년 · ' : ''}${c.areaCount}건${c.bargains ? ' · 급매 ' + c.bargains : ''}</span></td>
+      <td>${c.area}㎡</td>
+      <td><b>${fmtMoney(c.price)}</b>${c.shortfall > 0 ? `<span class="minor warn-text">부족 ${fmtMoney(c.shortfall)}</span>` : c.monthly ? `<span class="minor">월 ${fmtMoney(c.monthly)}</span>` : ''}</td>
+      <td><span class="badge ${c.status}" style="margin:0">${ST_LABEL[c.status]}</span><span class="minor">${c.score}점 ${esc(c.label)}</span></td>
+    </tr>`).join('')}
+  </table></div>${moreBtn(tid, rows.length - n)}`;
+}
 
 /* ═══════════ 레이더 ═══════════ */
 const RD_SCOPES = {

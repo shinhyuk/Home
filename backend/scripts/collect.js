@@ -7,10 +7,11 @@ const fs = require('fs');
 const path = require('path');
 const molitApi = require('../services/molitApi');
 const { LAWD_CODES } = require('../config/lawdCodes');
+const { clusterAreas } = require('../lib/areaCluster');
 
 // 수집 범위: 분석 엔진이 실제로 쓰는 (유형 × 개월수)
 const PLAN = [
-  { type: 'apt-trade', months: 6 },  // 추세 분석용
+  { type: 'apt-trade', months: 12 }, // 추세 분석 6개월 + 단지 조회(세부 평형) 1년
   { type: 'apt-rent', months: 2 },
   { type: 'offi-trade', months: 2 },
   { type: 'rh-trade', months: 2 },
@@ -213,19 +214,19 @@ function buildBargains(outDir) {
 
 // ───────────────────────── 단지 인덱스 + 좌표 ─────────────────────────
 
-// 지역별 단지 집계 (아파트 6개월 매매): 평형 버킷(10㎡)별 통계 포함
+// 지역별 단지 집계 (아파트 최근 1년 매매): 세부 평형(전용면적 클러스터)별 통계 포함
 function collectComplexes(outDir) {
   const nameByCode = {};
   for (const [name, code] of Object.entries(LAWD_CODES)) {
     if (!nameByCode[code]) nameByCode[code] = name;
   }
-  const months6 = recentMonths(6); // 최신순
-  const half = new Set(months6.slice(0, 3));
+  const months12 = recentMonths(12); // 최신순
+  const half = new Set(months12.slice(0, 6)); // 최근 6개월
   const byRegion = {};
 
   for (const [code, region] of Object.entries(nameByCode)) {
     const groups = new Map();
-    for (const ym of months6) {
+    for (const ym of months12) {
       for (const i of readJson(path.join(outDir, 'apt-trade', code, `${ym}.json`))) {
         if (i.cancelled || !(i.dealAmount > 0) || !(i.area > 0) || !i.name) continue;
         const key = `${i.name}|${i.dong}`;
@@ -240,30 +241,28 @@ function collectComplexes(outDir) {
       const pps = trades.map((t) => Math.round(t.pp)).sort((a, b) => a - b);
       trades.sort((a, b) => (b.dealYear * 10000 + b.dealMonth * 100 + b.dealDay) - (a.dealYear * 10000 + a.dealMonth * 100 + a.dealDay));
 
-      // 평형 버킷
-      const buckets = {};
-      for (const t of trades) {
-        const b = Math.round(t.area / 10);
-        if (!buckets[b]) buckets[b] = { trades: [] };
-        buckets[b].trades.push(t);
-      }
+      // 세부 평형 (전용면적 클러스터) — 거래는 이미 최신순 정렬됨
+      const { clusters } = clusterAreas(trades, (t) => t.area);
       const bk = {};
-      for (const [b, v] of Object.entries(buckets)) {
-        const am = v.trades.map((t) => t.dealAmount).sort((x, y) => x - y);
-        const ar = v.trades.map((t) => t.area).sort((x, y) => x - y);
-        const pp = v.trades.map((t) => Math.round(t.pp)).sort((x, y) => x - y);
-        const last = v.trades[0];
-        bk[b] = {
-          count: v.trades.length,
-          area: Math.round(median(ar) * 10) / 10,
-          median: median(am), min: am[0], max: am[am.length - 1],
-          pp: median(pp),
+      for (const cl of clusters) {
+        const v = cl.items.slice().sort((a, b) => (b.dealYear * 10000 + b.dealMonth * 100 + b.dealDay) - (a.dealYear * 10000 + a.dealMonth * 100 + a.dealDay));
+        const am = v.map((t) => t.dealAmount).sort((x, y) => x - y);
+        const pp = v.map((t) => Math.round(t.pp)).sort((x, y) => x - y);
+        const recent = v.filter((t) => half.has(t.ym));
+        const am6 = recent.map((t) => t.dealAmount).sort((x, y) => x - y);
+        const pp6 = recent.map((t) => Math.round(t.pp)).sort((x, y) => x - y);
+        const last = v[0];
+        bk[cl.key] = {
+          count: v.length, count6: recent.length,
+          area: cl.area,
+          median: median(am), min: am[0], max: am[am.length - 1], pp: median(pp),
+          median6: median(am6), pp6: median(pp6),
           last: `${last.dealYear}-${String(last.dealMonth).padStart(2, '0')}-${String(last.dealDay).padStart(2, '0')}`,
           lastPrice: last.dealAmount,
         };
       }
 
-      // 추세: 최근 3개월 vs 이전 3개월 평당 중위 (각 3건 이상일 때)
+      // 추세: 최근 6개월 vs 이전 6개월 평당 중위 (각 3건 이상일 때)
       const recentPP = trades.filter((t) => half.has(t.ym)).map((t) => Math.round(t.pp)).sort((a, b) => a - b);
       const olderPP = trades.filter((t) => !half.has(t.ym)).map((t) => Math.round(t.pp)).sort((a, b) => a - b);
       let trend = null;
@@ -277,6 +276,7 @@ function collectComplexes(outDir) {
         jibun: trades.find((t) => t.jibun)?.jibun || '',
         buildYear: trades.find((t) => t.buildYear)?.buildYear || null,
         count: trades.length,
+        count6: trades.filter((t) => half.has(t.ym)).length,
         medianPrice: median(amounts),
         minPrice: amounts[0], maxPrice: amounts[amounts.length - 1],
         pp: median(pps),

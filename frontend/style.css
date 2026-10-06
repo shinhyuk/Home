@@ -278,6 +278,20 @@ button.hero-cta:hover { background: rgba(255,255,255,.24); }
 .focus-ring { animation: pulse 1.4s ease-out infinite; }
 @keyframes pulse { 0% { stroke-opacity: .9; } 100% { stroke-opacity: .1; } }
 
+/* 세부 평형 선택 칩 */
+.unit-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+button.unit-chip {
+  width: auto; margin: 0; padding: 8px 14px; text-align: left;
+  background: var(--surface); color: var(--ink); border: 1.5px solid var(--line); border-radius: 12px;
+  font-size: 13.5px; font-weight: 500; display: flex; flex-direction: column; gap: 1px; line-height: 1.35;
+}
+button.unit-chip span { font-size: 12px; color: var(--sub); }
+button.unit-chip small { font-size: 11.5px; color: var(--faint); }
+button.unit-chip .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+button.unit-chip:hover { border-color: var(--brand); background: var(--brand-soft); }
+button.unit-chip.active { border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 0 0 3px var(--brand-soft); }
+button.unit-chip.active b { color: var(--brand-deep); }
+
 /* ── 외부 링크 (매물·호갱노노·지도) ── */
 a.ext {
   display: inline-block; padding: 1px 7px; margin-right: 2px;

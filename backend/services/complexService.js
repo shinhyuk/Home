@@ -6,6 +6,7 @@ const cache = require('./cacheService');
 const realEstate = require('./realEstateService');
 const { LAWD_CODES, resolveLawdCode } = require('../config/lawdCodes');
 const { REGULATION, maxLoanCapacity, monthlyPayment, normalizeInput } = require('./analysisService');
+const { clusterAreas, nearestBucket } = require('../lib/areaCluster');
 
 const PYEONG = 3.3058;
 const STATIC_DATA_BASE = process.env.STATIC_DATA_BASE
@@ -174,12 +175,12 @@ function scoreComplex(c, price, judge, ctx) {
 
 // 동네 평당 중위가 — bucket을 주면 같은 평형 버킷끼리만 비교 (소형일수록 평당가가 높아 왜곡 방지)
 // 거래량 가중 중위 (나홀로 단지 다수가 기준을 끌어내리지 않도록, 단지당 최대 20건 가중)
-function dongMedianPP(complexes, dong, bucket) {
+function dongMedianPP(complexes, dong, area) {
   const pps = [];
   for (const c of complexes) {
     if (c.dong !== dong) continue;
     let pp = null, n = 0;
-    if (bucket != null) { const b = c.buckets?.[bucket]; if (b) { pp = b.pp; n = b.count; } }
+    if (area != null) { const b = nearestBucket(c.buckets, area); if (b) { pp = b.v.pp; n = b.v.count; } }
     else { pp = c.pp; n = c.count; }
     if (!pp) continue;
     for (let i = 0; i < Math.min(n, 20); i++) pps.push(pp);
@@ -190,14 +191,19 @@ function dongMedianPP(complexes, dong, bucket) {
   return pps.length % 2 ? pps[m] : Math.round((pps[m - 1] + pps[m]) / 2);
 }
 
-// 평형대에 맞는 버킷(= round(㎡/10)) 중 거래 많은 것 (버킷 대표 면적으로 판정)
+// 평형대에 맞는 세부 평형 중 거래 많은 것
 function pickBucket(c, band) {
   let best = null;
-  for (const [b, v] of Object.entries(c.buckets || {})) {
+  for (const [key, v] of Object.entries(c.buckets || {})) {
     if (band !== 'any' && !realEstate.inBand(v.area, band)) continue;
-    if (!best || v.count > best.v.count) best = { id: Number(b), v };
+    if (!best || v.count > best.v.count) best = { key, v };
   }
   return best;
+}
+// 판정 기준가: 최근 6개월 거래 2건 이상이면 6개월 중위, 아니면 1년 중위
+function basisPrice(v) {
+  if (v.count6 >= 2 && v.median6) return { price: v.median6, pp: v.pp6 || v.pp, basis: '6m', n: v.count6 };
+  return { price: v.median, pp: v.pp, basis: '12m', n: v.count };
 }
 
 // ───────────────────────── 지도용 단지 목록 ─────────────────────────
@@ -215,18 +221,21 @@ async function mapComplexes(opts) {
 
   const items = list.map((c) => {
     const bk = pickBucket(c, band);
-    const price = bk ? bk.v.median : (band === 'any' ? c.medianPrice : null);
+    if (!bk && band !== 'any') return null;
+    const bp = bk ? basisPrice(bk.v) : { price: c.medianPrice, pp: c.pp, basis: '12m', n: c.count };
+    const price = bp.price;
     if (!price) return null;
-    const pk = `${c.dong}|${bk ? bk.id : ''}`;
-    if (!(pk in ppByDong)) ppByDong[pk] = dongMedianPP(data.complexes, c.dong, bk ? bk.id : null);
+    const pk = `${c.dong}|${bk ? Math.round(bk.v.area / 5) : ''}`;
+    if (!(pk in ppByDong)) ppByDong[pk] = dongMedianPP(data.complexes, c.dong, bk ? bk.v.area : null);
     const judge = judgePrice(price, cap);
-    const sc = scoreComplex({ ...c, pp: bk ? bk.v.pp : c.pp, count: bk ? bk.v.count : c.count }, price, judge, { dongPP: ppByDong[pk] });
+    const sc = scoreComplex({ ...c, pp: bp.pp, count: bk ? bk.v.count : c.count }, price, judge, { dongPP: ppByDong[pk] });
     return {
       name: c.name, dong: c.dong, jibun: c.jibun, buildYear: c.buildYear,
       lat: c.lat ?? null, lon: c.lon ?? null, geo: c.geo || null,
       count: c.count, bargains: c.bargains || 0, trend: c.trend,
-      area: bk ? bk.v.area : null, areaCount: bk ? bk.v.count : null,
-      price, pp: bk ? bk.v.pp : c.pp, min: bk ? bk.v.min : c.minPrice, max: bk ? bk.v.max : c.maxPrice,
+      area: bk ? bk.v.area : null, areaCount: bk ? bk.v.count : null, basis: bp.basis, basisN: bp.n,
+      units: Object.values(c.buckets || {}).map((v) => ({ area: v.area, count: v.count, median: v.median })).sort((a, b) => a.area - b.area),
+      price, pp: bp.pp, min: bk ? bk.v.min : c.minPrice, max: bk ? bk.v.max : c.maxPrice,
       last: bk ? bk.v.last : c.last,
       status: judge.status, budget: judge.budget, monthly: judge.monthly, shortfall: judge.shortfall, ratio: judge.ratio,
       score: sc.score, label: sc.label, why: sc.why, neg: sc.neg,
@@ -252,16 +261,18 @@ async function complexDetail({ region, dong, name, profile }) {
   try { data = await loadRegion(r.code); } catch (e) { /* 인덱스 없이도 원본으로 진행 */ }
   const entry = data?.complexes.find((c) => c.name === name && c.dong === dong) || null;
 
-  // 원본 실거래 (아파트 6개월) + 전세 (2개월)
-  const months6 = realEstate.recentMonths(6);
+  // 원본 실거래 (아파트 최근 1년) + 전세 (2개월)
+  const months12 = realEstate.recentMonths(12);
   const trades = [];
-  for (const ym of months6) {
+  for (let k = 0; k < months12.length; k++) {
+    const ym = months12[k];
     let items = [];
-    try { items = await realEstate.fetchMonthCached('apt-trade', r.code, ym); } catch (e) { items = []; }
+    // 최근 6개월은 캐시→정적→직접 순, 그 이전은 정적 데이터만 (해외 IP 차단 폴백 지연 방지)
+    try { items = k < 6 ? await realEstate.fetchMonthCached('apt-trade', r.code, ym) : await realEstate.fetchMonthStatic('apt-trade', r.code, ym); } catch (e) { items = []; }
     for (const i of items) {
       if (i.name === name && i.dong === dong && !i.cancelled && i.dealAmount > 0 && i.area > 0) {
         trades.push({
-          bucket: Math.round(i.area / 10),
+          rawArea: i.area,
           area: Math.round(i.area * 10) / 10, floor: i.floor ?? null, price: i.dealAmount,
           date: `${i.dealYear}-${String(i.dealMonth).padStart(2, '0')}-${String(i.dealDay).padStart(2, '0')}`,
           ym, pp: Math.round(i.dealAmount / (i.area / PYEONG)),
@@ -271,13 +282,12 @@ async function complexDetail({ region, dong, name, profile }) {
     }
   }
   const rents = [];
-  for (const ym of months6.slice(0, 2)) {
+  for (const ym of months12.slice(0, 2)) {
     let items = [];
     try { items = await realEstate.fetchMonthCached('apt-rent', r.code, ym); } catch (e) { items = []; }
     for (const i of items) {
       if (i.name === name && i.dong === dong && i.area > 0) {
         rents.push({
-          bucket: Math.round(i.area / 10),
           area: Math.round(i.area * 10) / 10, floor: i.floor ?? null, deposit: i.deposit, monthlyRent: i.monthlyRent,
           type: i.monthlyRent > 0 ? '월세' : '전세',
           date: `${i.dealYear}-${String(i.dealMonth).padStart(2, '0')}-${String(i.dealDay).padStart(2, '0')}`,
@@ -285,66 +295,72 @@ async function complexDetail({ region, dong, name, profile }) {
       }
     }
   }
-  if (!trades.length && !entry) return { error: '최근 6개월 실거래가 없는 단지입니다.' };
+  if (!trades.length && !entry) return { error: '최근 1년 실거래가 없는 단지입니다.' };
   trades.sort((a, b) => b.date.localeCompare(a.date));
   rents.sort((a, b) => b.date.localeCompare(a.date));
 
   const cap = profileCapital(profile);
   const med = (arr) => { if (!arr.length) return null; const s = arr.slice().sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2); };
+  const half = new Set(months12.slice(0, 6)); // 최근 6개월
 
-  // 평형별 분석
-  const byBucket = new Map();
-  for (const t of trades) {
-    if (!byBucket.has(t.bucket)) byBucket.set(t.bucket, []);
-    byBucket.get(t.bucket).push(t);
-  }
-  const half = new Set(months6.slice(0, 3));
-  const units = [...byBucket.entries()].map(([b, list]) => {
+  // 세부 평형별 분석 (전용면적 클러스터)
+  const { clusters } = clusterAreas(trades, (t) => t.rawArea);
+  const units = clusters.map((cl) => {
+    const list = cl.items.slice().sort((a, b) => b.date.localeCompare(a.date));
+    const recent = list.filter((t) => half.has(t.ym));
+    const older = list.filter((t) => !half.has(t.ym));
     const prices = list.map((t) => t.price);
     const pps = list.map((t) => t.pp);
-    const areaTyp = med(list.map((t) => t.area));
-    const jeonse = rents.filter((x) => x.type === '전세' && x.bucket === b);
-    const dongPP = data ? dongMedianPP(data.complexes, dong, b) : null;
+    const areaTyp = cl.area;
+    const jeonse = rents.filter((x) => x.type === '전세' && Math.abs(x.area - areaTyp) <= 4);
+    const dongPP = data ? dongMedianPP(data.complexes, dong, areaTyp) : null;
     const jeonseMed = med(jeonse.map((x) => x.deposit));
-    const medPrice = med(prices);
-    const jeonseRatio = jeonseMed && medPrice ? Math.round((jeonseMed / medPrice) * 100) : null;
-    const recentPP = list.filter((t) => half.has(t.ym)).map((t) => t.pp);
-    const olderPP = list.filter((t) => !half.has(t.ym)).map((t) => t.pp);
-    const trend = recentPP.length >= 2 && olderPP.length >= 2
-      ? Math.round(((med(recentPP) - med(olderPP)) / med(olderPP)) * 1000) / 10 : null;
-    const judge = judgePrice(medPrice, cap);
+    const median12 = med(prices);
+    const median6 = med(recent.map((t) => t.price));
+    const useRecent = recent.length >= 2 && median6;
+    const price = useRecent ? median6 : median12;
+    const pp = useRecent ? med(recent.map((t) => t.pp)) : med(pps);
+    const jeonseRatio = jeonseMed && price ? Math.round((jeonseMed / price) * 100) : null;
+    const trend = recent.length >= 2 && older.length >= 2
+      ? Math.round(((med(recent.map((t) => t.pp)) - med(older.map((t) => t.pp))) / med(older.map((t) => t.pp))) * 1000) / 10 : null;
+    const judge = judgePrice(price, cap);
     const sc = scoreComplex({
-      pp: med(pps), count: list.length, trend, buildYear: entry?.buildYear, bargains: entry?.bargains || 0,
-    }, medPrice, judge, { dongPP, jeonseRatio });
+      pp, count: list.length, trend, buildYear: entry?.buildYear, bargains: entry?.bargains || 0,
+    }, price, judge, { dongPP, jeonseRatio });
     const monthly = {};
     for (const t of list) { (monthly[t.ym] = monthly[t.ym] || []).push(t.pp); }
+
+    // 이웃 단지 (같은 세부 평형끼리)
+    const neighbors = (data?.complexes || [])
+      .filter((c) => c.dong === dong && c.name !== name)
+      .map((c) => {
+        const nb = nearestBucket(c.buckets, areaTyp);
+        const b = nb ? nb.v : null;
+        const bp = b ? basisPrice(b) : null;
+        return {
+          name: c.name, buildYear: c.buildYear, count: c.count, trend: c.trend,
+          sameBand: Boolean(b), area: b ? b.area : null, bandCount: b ? b.count : null,
+          medianPrice: bp ? bp.price : c.medianPrice, pp: bp ? bp.pp : c.pp,
+          relPP: dongPP && bp ? Math.round((bp.pp / dongPP - 1) * 100) : null,
+        };
+      })
+      .sort((a, b) => Number(b.sameBand) - Number(a.sameBand) || b.count - a.count)
+      .slice(0, 12);
+
     return {
-      bucket: b, area: areaTyp, pyeong: Math.round(areaTyp / PYEONG),
-      count: list.length, median: medPrice, min: Math.min(...prices), max: Math.max(...prices), pp: med(pps),
-      dongPP, relPP: dongPP ? Math.round((med(pps) / dongPP - 1) * 100) : null,
+      key: cl.key, area: areaTyp, pyeong: Math.round(areaTyp / PYEONG),
+      areas: [...new Set(list.map((t) => t.area))].sort((a, b) => a - b),
+      count: list.length, count6: recent.length,
+      basis: useRecent ? '6m' : '12m', median: price, median12, median6,
+      min: Math.min(...prices), max: Math.max(...prices), pp,
+      dongPP, relPP: dongPP && pp ? Math.round((pp / dongPP - 1) * 100) : null,
       trend, jeonseCount: jeonse.length, jeonseMedian: jeonseMed, jeonseRatio,
       judge, score: sc.score, label: sc.label, why: sc.why, neg: sc.neg,
-      monthly: months6.slice().reverse().map((ym) => ({ month: `${ym.slice(0, 4)}-${ym.slice(4)}`, count: (monthly[ym] || []).length, pp: med(monthly[ym] || []) })),
-      trades: list.slice(0, 12),
+      monthly: months12.slice().reverse().map((ym) => ({ month: `${ym.slice(0, 4)}-${ym.slice(4)}`, count: (monthly[ym] || []).length, pp: med(monthly[ym] || []) })),
+      trades: list.slice(0, 20),
+      neighbors,
     };
   }).sort((a, b) => b.count - a.count);
-
-  // 같은 동 이웃 단지 — 이 단지의 주력 평형과 같은 버킷끼리 비교
-  const mainBucket = units[0]?.bucket ?? null;
-  const dongPP = data ? dongMedianPP(data.complexes, dong, mainBucket) : null;
-  const neighbors = (data?.complexes || [])
-    .filter((c) => c.dong === dong && c.name !== name)
-    .map((c) => {
-      const b = mainBucket != null ? c.buckets?.[mainBucket] : null;
-      return {
-        name: c.name, buildYear: c.buildYear, count: c.count, trend: c.trend, lat: c.lat, lon: c.lon, geo: c.geo,
-        sameBand: Boolean(b), area: b ? b.area : null, bandCount: b ? b.count : null,
-        medianPrice: b ? b.median : c.medianPrice, pp: b ? b.pp : c.pp,
-        relPP: dongPP && b ? Math.round((b.pp / dongPP - 1) * 100) : null,
-      };
-    })
-    .sort((a, b) => Number(b.sameBand) - Number(a.sameBand) || b.count - a.count)
-    .slice(0, 12);
 
   // 급매 이력
   const bg = await loadBargains();
@@ -354,10 +370,11 @@ async function complexDetail({ region, dong, name, profile }) {
     region: r.name, code: r.code, dong, name,
     jibun: entry?.jibun || '', buildYear: entry?.buildYear || null,
     lat: entry?.lat ?? null, lon: entry?.lon ?? null, geo: entry?.geo || null,
-    tradeCount: trades.length, medianPrice: med(trades.map((t) => t.price)), pp: med(trades.map((t) => t.pp)),
-    mainBucket, dongPP, relPP: units[0]?.relPP ?? null,
+    tradeCount: trades.length, tradeCount6: trades.filter((t) => half.has(t.ym)).length,
+    medianPrice: med(trades.map((t) => t.price)), pp: med(trades.map((t) => t.pp)),
+    months: months12.length,
     capital: cap ? { own: cap.own, income: cap.income, currentHome: cap.currentHome } : null,
-    units, rents: rents.slice(0, 10), bargains, neighbors,
+    units, rents: rents.slice(0, 10), bargains,
     regulation: { asOf: REGULATION.asOf, rate: REGULATION.mortgageRate },
   };
 }

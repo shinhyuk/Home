@@ -49,6 +49,17 @@ async function fetchMonthCached(endpointKey, lawdCd, dealYmd) {
   return items;
 }
 
+// 정적 데이터만 (국토부 직접 호출 폴백 없음) — 수집 범위 밖 월은 빈 배열
+async function fetchMonthStatic(endpointKey, lawdCd, dealYmd) {
+  const key = `molit:${endpointKey}:${lawdCd}:${dealYmd}`;
+  const cached = await cache.get(key);
+  if (cached) return cached;
+  let items = [];
+  try { items = (await fetchStatic(endpointKey, lawdCd, dealYmd)) || []; } catch (e) { items = []; }
+  if (items.length) await cache.set(key, items, ttlFor(dealYmd));
+  return items;
+}
+
 // ───────────────────────── 날짜 유틸 ─────────────────────────
 
 // 최근 N개 "완결된" 월 목록 (YYYYMM, 최신순) — 당월은 신고 지연으로 제외
@@ -360,6 +371,7 @@ module.exports = {
   getComplexStats,
   getAllRegionSummaries,
   fetchMonthCached,
+  fetchMonthStatic,
   recentMonths,
   listRegions,
 };

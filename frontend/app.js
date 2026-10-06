@@ -443,11 +443,11 @@ async function cxSearch() {
   box.innerHTML = '<p class="muted">검색 중…</p>';
   try {
     const rows = await apiFetch('/api/real-estate/complex/search?q=' + encodeURIComponent(q));
-    if (!rows.length) { box.innerHTML = '<p class="muted">최근 6개월 실거래에 없는 단지입니다. 동 이름을 붙이거나 다른 표기(예: "동아3" / "동아3차")로 시도해보세요.</p>'; return; }
+    if (!rows.length) { box.innerHTML = '<p class="muted">최근 1년 실거래에 없는 단지입니다. 동 이름을 붙이거나 다른 표기(예: "동아3" / "동아3차")로 시도해보세요.</p>'; return; }
     box.innerHTML = rows.map((r) => `
       <div class="cx-result" onclick="cxOpen('${encodeURIComponent(r.region)}','${encodeURIComponent(r.dong)}','${encodeURIComponent(r.name)}')">
         <div><span class="nm">${esc(r.name)}</span> <span class="mt">${esc(r.region)} ${esc(r.dong)}${r.buildYear ? ' · ' + r.buildYear + '년' : ''}</span></div>
-        <div class="mt" style="text-align:right;white-space:nowrap"><b style="color:var(--ink)">${fmtMoney(r.medianPrice)}</b><br>6개월 ${r.count}건</div>
+        <div class="mt" style="text-align:right;white-space:nowrap"><b style="color:var(--ink)">${fmtMoney(r.medianPrice)}</b><br>1년 ${r.count}건</div>
       </div>`).join('');
     if (rows.length === 1) cxOpen(encodeURIComponent(rows[0].region), encodeURIComponent(rows[0].dong), encodeURIComponent(rows[0].name));
   } catch (e) {
@@ -469,65 +469,34 @@ async function cxOpen(regionEnc, dongEnc, nameEnc) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ region, dong, name, profile: profileForApi() }),
     });
-    cxRenderDetail(d);
-    // 지도: 같은 동 → 포커스
     document.getElementById('cxMapRegion').value = d.region;
-    const mainUnit = d.units[0];
-    if (mainUnit) {
-      const b = mainUnit.area <= 60 ? 'small' : mainUnit.area <= 85 ? 'mid84' : mainUnit.area <= 135 ? 'large' : 'xlarge';
-      document.getElementById('cxMapBand').value = b;
-    }
+    cxRenderDetail(d); // 평형 선택 시 지도 평형도 맞춰 로드
     cxMapLoad({ focus: d });
   } catch (e) {
     det.innerHTML = `<div class="card"><div class="error-box">${esc(e.message)}</div></div>`;
   }
 }
 
+let CX_DETAIL = null;
+function cxDefaultUnit(d) {
+  const band = (getProfile() || {}).areaBand;
+  if (band && band !== 'any') {
+    const inBand = d.units.filter((u) => {
+      const a = u.area;
+      return band === 'small' ? a <= 60 : band === 'mid84' ? a > 60 && a <= 85 : band === 'large' ? a > 85 && a <= 135 : a > 135;
+    });
+    if (inBand.length) return inBand[0].key;
+  }
+  return d.units[0]?.key;
+}
+
 function cxRenderDetail(d) {
+  CX_DETAIL = d;
   const cap = d.capital;
   const links = extLinks(d.region, d.dong, d.name);
   const capLine = cap
     ? `내 기준: 자기자금 <b>${fmtMoney(cap.own)}</b> · 연소득 <b>${fmtMoney(cap.income)}</b> · ${cap.currentHome === 'multi' ? '다주택 (추가 주담대 불가)' : '주담대 LTV·DSR·가격구간 상한 적용'} · ${d.regulation.asOf} 규제 · 금리 ${d.regulation.rate}%`
     : `<a href="#profile" onclick="switchTab('profile');return false"><b>내 정보</b></a>를 입력하면 이 단지를 살 수 있는지(대출·월상환 포함) 판정해드립니다.`;
-
-  const unitHtml = d.units.map((u) => {
-    const j = u.judge || {};
-    const st = j.status || 'unknown';
-    const money = st === 'unknown' ? '' : `
-      ${kv('내 최대 예산 (이 가격대 기준)', fmtMoney(j.budget))}
-      ${kv('필요 대출', fmtMoney(j.loanNeeded) + (j.loanNeeded > j.maxLoan ? ` <span class="warn-text">(한도 ${fmtMoney(j.maxLoan)})</span>` : ''))}
-      ${kv('월 상환 (30년·' + d.regulation.rate + '%)', fmtMoney(j.monthly))}
-      ${j.shortfall > 0 ? kv('부족 자금', `<span class="warn-text"><b>${fmtMoney(j.shortfall)}</b></span>`) : kv('예산 충족률', `<b>${j.ratio}%</b>`)}`;
-    const trades = u.trades.map((t) => `<tr><td>${t.date.slice(2)}</td><td>${t.floor ?? '-'}층</td><td>${t.area}㎡</td><td><b>${fmtMoney(t.price)}</b></td><td>${fmtMoney(t.pp)}</td><td>${t.direct ? '<span class="badge hard">직거래</span>' : ''}</td></tr>`).join('');
-    const monthly = u.monthly.map((m) => `<td>${m.count ? `<b>${fmtMoney(m.pp)}</b><span class="minor">${m.count}건</span>` : '<span class="muted">-</span>'}</td>`).join('');
-    return `
-      <div class="unit ${st}">
-        <div class="unit-head">
-          <span class="py">전용 ${u.area}㎡ <span style="font-weight:500;font-size:14px;color:var(--sub)">(약 ${supplyPyeong(u.area)}평형)</span></span>
-          <span class="badge ${st}" style="margin:0">${ST_LABEL[st]}</span>
-          <span class="score-pill ${scoreCls(u.score)}">${esc(u.label)} · ${u.score}점</span>
-          <span class="muted">6개월 ${u.count}건</span>
-        </div>
-        <div class="why">${u.why.map((w) => `<span>✓ ${esc(w)}</span>`).join('')}${u.neg.map((w) => `<span class="neg">! ${esc(w)}</span>`).join('')}</div>
-        <div class="unit-grid">
-          <div>
-            ${kv('실거래 중위가', `<span class="big">${fmtMoney(u.median)}</span>`)}
-            ${kv('범위 (최저~최고)', `${fmtMoney(u.min)} ~ ${fmtMoney(u.max)}`)}
-            ${kv('평당가 (전용)', fmtMoney(u.pp) + (u.relPP != null ? ` <span class="${u.relPP > 0 ? 'warn-text' : ''}" style="font-size:12px">동네 ${u.relPP > 0 ? '+' : ''}${u.relPP}%</span>` : ''))}
-            ${u.trend != null ? kv('최근 3개월 vs 이전 3개월', `<span class="${u.trend > 1 ? 'up' : u.trend < -1 ? 'down' : ''}">${u.trend > 0 ? '+' : ''}${u.trend}%</span>`) : ''}
-            ${u.jeonseMedian ? kv('전세 중위 (최근 2개월 ' + u.jeonseCount + '건)', `${fmtMoney(u.jeonseMedian)} <span class="muted">전세가율 ${u.jeonseRatio}%</span>`) : kv('전세 체결 (최근 2개월)', '<span class="muted">없음</span>')}
-          </div>
-          <div>${money}</div>
-        </div>
-        <div class="table-wrap" style="margin-top:10px"><table>
-          <tr>${u.monthly.map((m) => `<th>${m.month.slice(2)}</th>`).join('')}</tr>
-          <tr>${monthly}</tr>
-        </table></div>
-        <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">최근 체결 ${u.trades.length}건 보기</summary>
-          <div class="table-wrap"><table><tr><th>일자</th><th>층</th><th>전용</th><th>가격</th><th>평당</th><th></th></tr>${trades}</table></div>
-        </details>
-      </div>`;
-  }).join('');
 
   const bg = d.bargains.length ? `
     <div class="card">
@@ -538,37 +507,98 @@ function cxRenderDetail(d) {
       <p class="muted">급매가 터진 단지 = 그 가격을 앵커로 협상 가능. 단, 직거래·저층은 할인 사유 확인.</p>
     </div>` : '';
 
-  const nb = d.neighbors.length ? `
-    <div class="card">
-      <h2>🏘 ${esc(d.dong)} 이웃 단지 비교 <span class="sub">${d.mainBucket != null ? '같은 평형대 기준' : '전체'} · 동네 평당 중위 ${fmtMoney(d.dongPP)}</span></h2>
-      <div class="table-wrap"><table id="cxNbT">
-        <tr><th>단지</th><th>전용</th><th>중위가</th><th>평당</th><th>동네 대비</th><th>6개월</th></tr>
-        <tr style="background:var(--brand-soft)"><td><b>${esc(d.name)}</b> <span class="minor">${d.buildYear ? d.buildYear + '년' : ''} · 이 단지</span></td><td>${d.units[0]?.area ?? '-'}㎡</td><td><b>${fmtMoney(d.units[0]?.median)}</b></td><td>${fmtMoney(d.units[0]?.pp)}</td><td class="${(d.relPP ?? 0) > 0 ? 'warn-text' : ''}">${d.relPP != null ? (d.relPP > 0 ? '+' : '') + d.relPP + '%' : '-'}</td><td>${d.tradeCount}건</td></tr>
-        ${d.neighbors.map((n, i) => `<tr class="${i >= 6 ? 'extra' : ''}" style="${n.sameBand ? '' : 'opacity:.6'}">
-          <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(d.region)}','${encodeURIComponent(d.dong)}','${encodeURIComponent(n.name)}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(n.name)}</b></a><span class="minor">${n.buildYear ? n.buildYear + '년' : ''}${n.sameBand ? '' : ' · 다른 평형만 거래'}</span></td>
-          <td>${n.area ? n.area + '㎡' : '-'}</td><td><b>${fmtMoney(n.medianPrice)}</b></td><td>${fmtMoney(n.pp)}</td>
-          <td class="${(n.relPP ?? 0) > 0 ? 'warn-text' : (n.relPP ?? 0) < 0 ? 'down' : ''}">${n.relPP != null ? (n.relPP > 0 ? '+' : '') + n.relPP + '%' : '-'}</td>
-          <td>${n.count}건${n.trend != null ? `<span class="minor ${n.trend > 1 ? 'up' : n.trend < -1 ? 'down' : ''}">${n.trend > 0 ? '+' : ''}${n.trend}%</span>` : ''}</td>
-        </tr>`).join('')}
-      </table></div>${moreBtn('cxNbT', d.neighbors.length - 6)}
-    </div>` : '';
-
   document.getElementById('cxDetail').innerHTML = `
     <div class="card">
       <div class="cx-head">
         <div>
           <h2>🏢 ${esc(d.name)} <span class="badge">아파트</span></h2>
-          <p style="margin:4px 0 0;color:var(--sub);font-size:13.5px">${esc(d.region)} ${esc(d.dong)} ${esc(d.jibun)} · ${d.buildYear ? d.buildYear + '년 준공 (' + (new Date().getFullYear() - d.buildYear) + '년차)' : '준공년도 미상'} · 6개월 ${d.tradeCount}건 · ${links}</p>
+          <p style="margin:4px 0 0;color:var(--sub);font-size:13.5px">${esc(d.region)} ${esc(d.dong)} ${esc(d.jibun)} · ${d.buildYear ? d.buildYear + '년 준공 (' + (new Date().getFullYear() - d.buildYear) + '년차)' : '준공년도 미상'} · 최근 1년 ${d.tradeCount}건 (6개월 ${d.tradeCount6}건) · ${links}</p>
         </div>
         <div class="notice" style="margin:0;max-width:420px">${capLine}</div>
       </div>
     </div>
     <div class="card">
-      <h2>📐 평형별 판정 <span class="sub">전용면적 10㎡ 버킷 · 국토부 실거래 6개월</span></h2>
-      ${unitHtml || '<p class="muted">최근 6개월 실거래가 없습니다.</p>'}
+      <h2>📐 평형 선택 <span class="sub">최근 1년 거래가 있는 세부 평형만 · 전용면적 기준</span></h2>
+      <div class="unit-chips" id="cxUnitChips"></div>
+      <div id="cxUnitBox"></div>
       ${d.rents.filter((r) => r.type === '월세').length ? `<p class="muted">월세 체결 ${d.rents.filter((r) => r.type === '월세').length}건 (최근 2개월): ${d.rents.filter((r) => r.type === '월세').slice(0, 3).map((r) => `${r.area}㎡ ${fmtMoney(r.deposit)}/${r.monthlyRent}만`).join(' · ')}</p>` : ''}
     </div>
-    ${bg}${nb}`;
+    ${bg}
+    <div id="cxNbBox"></div>`;
+
+  cxSelectUnit(cxDefaultUnit(d));
+}
+
+function cxSelectUnit(key) {
+  const d = CX_DETAIL;
+  if (!d) return;
+  const u = d.units.find((x) => x.key === key) || d.units[0];
+  document.getElementById('cxUnitChips').innerHTML = d.units.map((x) => {
+    const st = x.judge?.status || 'unknown';
+    return `<button type="button" class="unit-chip ${x.key === u?.key ? 'active' : ''}" onclick="cxSelectUnit('${x.key}')">
+      <i class="dot" style="background:${ST_COLOR[st]}"></i><b>전용 ${x.area}㎡</b> <span>약 ${supplyPyeong(x.area)}평형</span><small>${fmtMoney(x.median)} · ${x.count}건</small></button>`;
+  }).join('') + (d.units.length ? '' : '<p class="muted">최근 1년 실거래가 없습니다.</p>');
+  if (!u) { document.getElementById('cxUnitBox').innerHTML = ''; document.getElementById('cxNbBox').innerHTML = ''; return; }
+
+  const j = u.judge || {};
+  const st = j.status || 'unknown';
+  const money = st === 'unknown' ? '<p class="muted">내 정보를 입력하면 대출·월상환·부족분이 계산됩니다.</p>' : `
+    ${kv('내 최대 예산 (이 가격대 기준)', fmtMoney(j.budget))}
+    ${kv('필요 대출', fmtMoney(j.loanNeeded) + (j.loanNeeded > j.maxLoan ? ` <span class="warn-text">(한도 ${fmtMoney(j.maxLoan)})</span>` : ''))}
+    ${kv('월 상환 (30년·' + d.regulation.rate + '%)', fmtMoney(j.monthly))}
+    ${j.shortfall > 0 ? kv('부족 자금', `<span class="warn-text"><b>${fmtMoney(j.shortfall)}</b></span>`) : kv('예산 충족률', `<b>${j.ratio}%</b>`)}`;
+  const trades = u.trades.map((t) => `<tr><td>${t.date.slice(2)}</td><td>${t.floor ?? '-'}층</td><td>${t.area}㎡</td><td><b>${fmtMoney(t.price)}</b></td><td>${fmtMoney(t.pp)}</td><td>${t.direct ? '<span class="badge hard">직거래</span>' : ''}</td></tr>`).join('');
+  const basisTxt = u.basis === '6m' ? `최근 6개월 ${u.count6}건 중위` : `최근 1년 ${u.count}건 중위 (6개월 내 거래 ${u.count6}건)`;
+
+  document.getElementById('cxUnitBox').innerHTML = `
+    <div class="unit ${st}">
+      <div class="unit-head">
+        <span class="py">전용 ${u.area}㎡ <span style="font-weight:500;font-size:14px;color:var(--sub)">(약 ${supplyPyeong(u.area)}평형${u.areas.length > 1 ? ' · ' + u.areas.join('/') + '㎡' : ''})</span></span>
+        <span class="badge ${st}" style="margin:0">${ST_LABEL[st]}</span>
+        <span class="score-pill ${scoreCls(u.score)}">${esc(u.label)} · ${u.score}점</span>
+      </div>
+      <div class="why">${u.why.map((w) => `<span>✓ ${esc(w)}</span>`).join('')}${u.neg.map((w) => `<span class="neg">! ${esc(w)}</span>`).join('')}</div>
+      <div class="unit-grid">
+        <div>
+          ${kv('실거래 중위가 <span class="muted">(' + basisTxt + ')</span>', `<span class="big">${fmtMoney(u.median)}</span>`)}
+          ${u.basis === '6m' && u.median12 !== u.median ? kv('1년 전체 중위 (' + u.count + '건)', fmtMoney(u.median12)) : ''}
+          ${kv('범위 (1년 최저~최고)', `${fmtMoney(u.min)} ~ ${fmtMoney(u.max)}`)}
+          ${kv('평당가 (전용)', fmtMoney(u.pp) + (u.relPP != null ? ` <span class="${u.relPP > 0 ? 'warn-text' : ''}" style="font-size:12px">동네 같은 평형 대비 ${u.relPP > 0 ? '+' : ''}${u.relPP}%</span>` : ''))}
+          ${u.trend != null ? kv('최근 6개월 vs 이전 6개월', `<span class="${u.trend > 1 ? 'up' : u.trend < -1 ? 'down' : ''}">${u.trend > 0 ? '+' : ''}${u.trend}%</span>`) : ''}
+          ${u.jeonseMedian ? kv('전세 중위 (최근 2개월 ' + u.jeonseCount + '건)', `${fmtMoney(u.jeonseMedian)} <span class="muted">전세가율 ${u.jeonseRatio}%</span>`) : kv('전세 체결 (최근 2개월)', '<span class="muted">없음</span>')}
+        </div>
+        <div>${money}</div>
+      </div>
+      <div class="table-wrap" style="margin-top:10px"><table>
+        <tr>${u.monthly.map((m) => `<th>${m.month.slice(2)}</th>`).join('')}</tr>
+        <tr>${u.monthly.map((m) => `<td>${m.count ? `<b>${fmtMoney(m.pp)}</b><span class="minor">${m.count}건</span>` : '<span class="muted">-</span>'}</td>`).join('')}</tr>
+      </table></div>
+      <p class="muted" style="margin:6px 0 0">월별 평당가 (전용 기준) · 거래 건수</p>
+      <details style="margin-top:8px" open><summary class="muted" style="cursor:pointer">이 평형 체결 ${u.trades.length}건${u.count > u.trades.length ? ' (최근 ' + u.trades.length + '건만)' : ''}</summary>
+        <div class="table-wrap"><table><tr><th>일자</th><th>층</th><th>전용</th><th>가격</th><th>평당</th><th></th></tr>${trades}</table></div>
+      </details>
+    </div>`;
+
+  const nb = u.neighbors || [];
+  document.getElementById('cxNbBox').innerHTML = nb.length ? `
+    <div class="card">
+      <h2>🏘 ${esc(d.dong)} 이웃 단지 — 전용 ${u.area}㎡급 비교 <span class="sub">동네 같은 평형 평당 중위 ${fmtMoney(u.dongPP)}</span></h2>
+      <div class="table-wrap"><table id="cxNbT">
+        <tr><th>단지</th><th>전용</th><th>중위가</th><th>평당</th><th>동네 대비</th><th>1년</th></tr>
+        <tr style="background:var(--brand-soft)"><td><b>${esc(d.name)}</b> <span class="minor">${d.buildYear ? d.buildYear + '년' : ''} · 이 단지</span></td><td>${u.area}㎡</td><td><b>${fmtMoney(u.median)}</b></td><td>${fmtMoney(u.pp)}</td><td class="${(u.relPP ?? 0) > 0 ? 'warn-text' : ''}">${u.relPP != null ? (u.relPP > 0 ? '+' : '') + u.relPP + '%' : '-'}</td><td>${u.count}건</td></tr>
+        ${nb.map((n, i) => `<tr class="${i >= 6 ? 'extra' : ''}" style="${n.sameBand ? '' : 'opacity:.6'}">
+          <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(d.region)}','${encodeURIComponent(d.dong)}','${encodeURIComponent(n.name)}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(n.name)}</b></a><span class="minor">${n.buildYear ? n.buildYear + '년' : ''}${n.sameBand ? '' : ' · 이 평형 거래 없음 (전체)'}</span></td>
+          <td>${n.area ? n.area + '㎡' : '-'}</td><td><b>${fmtMoney(n.medianPrice)}</b></td><td>${fmtMoney(n.pp)}</td>
+          <td class="${(n.relPP ?? 0) > 0 ? 'warn-text' : (n.relPP ?? 0) < 0 ? 'down' : ''}">${n.relPP != null ? (n.relPP > 0 ? '+' : '') + n.relPP + '%' : '-'}</td>
+          <td>${n.bandCount ?? n.count}건${n.trend != null ? `<span class="minor ${n.trend > 1 ? 'up' : n.trend < -1 ? 'down' : ''}">${n.trend > 0 ? '+' : ''}${n.trend}%</span>` : ''}</td>
+        </tr>`).join('')}
+      </table></div>${moreBtn('cxNbT', nb.length - 6)}
+    </div>` : '';
+
+  // 지도 평형도 선택 평형에 맞춤
+  const bandSel = document.getElementById('cxMapBand');
+  const b = u.area <= 60 ? 'small' : u.area <= 85 ? 'mid84' : u.area <= 135 ? 'large' : 'xlarge';
+  if (bandSel.value !== b) { bandSel.value = b; cxMapLoad({ focus: d }); }
 }
 
 /* ── 지도 (공용) ── */
@@ -635,6 +665,7 @@ function cxPopup(region, c) {
     ${kv('평당가', fmtMoney(c.pp))}
     ${c.status !== 'unknown' ? kv(c.shortfall > 0 ? '부족 자금' : '월 상환', c.shortfall > 0 ? `<span class="warn-text">${fmtMoney(c.shortfall)}</span>` : fmtMoney(c.monthly)) : ''}
     ${kv('최근 체결', c.last)}
+    ${c.units && c.units.length > 1 ? `<div class="muted" style="margin-top:4px">평형: ${c.units.map((x) => `${x.area}㎡ ${fmtMoney(x.median)}`).join(' · ')}</div>` : ''}
     <div class="why">${(c.why || []).slice(0, 3).map((w) => `<span>✓ ${esc(w)}</span>`).join('')}${(c.neg || []).slice(0, 2).map((w) => `<span class="neg">! ${esc(w)}</span>`).join('')}</div>
     <div style="margin-top:4px">${extLinks(region, c.dong, c.name)}</div>`;
 }
@@ -649,7 +680,7 @@ function cxMapList(listId, data, n, onlyOk) {
       <tr><th>#</th><th>단지</th><th>전용</th><th>중위가</th><th>판정</th><th>점수</th></tr>
       ${rows.map((c, i) => `<tr class="${i >= n ? 'extra' : ''}">
         <td>${i + 1}</td>
-        <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(data.region)}','${encodeURIComponent(c.dong)}','${encodeURIComponent(c.name)}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(c.name)}</b></a>${c.lat == null ? ' <span class="badge" title="좌표 수집 중">지도 X</span>' : ''}<span class="minor">${esc(c.dong)} · ${c.buildYear ? c.buildYear + '년 · ' : ''}${c.count}건${c.bargains ? ' · 급매 ' + c.bargains : ''}</span></td>
+        <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(data.region)}','${encodeURIComponent(c.dong)}','${encodeURIComponent(c.name)}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(c.name)}</b></a>${c.lat == null ? ' <span class="badge" title="좌표 수집 중">지도 X</span>' : ''}<span class="minor">${esc(c.dong)} · ${c.buildYear ? c.buildYear + '년 · ' : ''}1년 ${c.count}건${c.units && c.units.length > 1 ? ' · 평형 ' + c.units.length + '개' : ''}${c.bargains ? ' · 급매 ' + c.bargains : ''}</span></td>
         <td>${c.area ?? '-'}㎡${c.area ? `<span class="minor">${supplyPyeong(c.area)}평형</span>` : ''}</td>
         <td><b>${fmtMoney(c.price)}</b>${c.shortfall > 0 ? `<span class="minor warn-text">부족 ${fmtMoney(c.shortfall)}</span>` : c.monthly ? `<span class="minor">월 ${fmtMoney(c.monthly)}</span>` : ''}</td>
         <td><span class="badge ${c.status}" style="margin:0">${ST_LABEL[c.status]}</span></td>

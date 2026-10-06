@@ -3,6 +3,8 @@
 /* ═══════════ 공통 유틸 ═══════════ */
 const FEASIBLE_LABEL = { possible: '가능', tight: '빠듯함', hard: '어려움', ineligible: '자격 없음', unknown: '정보 부족' };
 const pyeongOfM2 = (m2) => Math.round(m2 / 3.3058);
+// 전용 ㎡ → 흔히 부르는 공급 평형 (전용의 약 1.33배): 59㎡→24평, 84㎡→34평
+const supplyPyeong = (m2) => Math.round((m2 * 1.33) / 3.3058);
 
 function kv(label, value, big) {
   return `<div class="kv"><span>${label}</span><b class="${big ? 'big' : ''}">${value}</b></div>`;
@@ -25,7 +27,7 @@ function profileComplete(p) {
 }
 
 /* ═══════════ 탭 ═══════════ */
-const TABS = ['home', 'profile', 'analysis', 'radar', 'bargains'];
+const TABS = ['home', 'profile', 'analysis', 'complex', 'radar', 'bargains'];
 const tabInited = {};
 
 function switchTab(name) {
@@ -41,6 +43,7 @@ function switchTab(name) {
   if (name === 'analysis' && !window.REPORT_DATA && !analysisBusy) runAnalysis(false);
   if (name === 'radar' && !tabInited.radar) { tabInited.radar = true; rdScan(); }
   if (name === 'bargains' && !tabInited.bargains) { tabInited.bargains = true; bgLoad(); }
+  if (name === 'complex' && !tabInited.complex) { tabInited.complex = true; cxInit(); }
   if (name === 'home') renderHome();
 }
 
@@ -83,7 +86,9 @@ function naverLink(c) {
 function extLinks(region, dong, name) {
   const q = encodeURIComponent(`${dong} ${name}`);
   const full = encodeURIComponent(`${region} ${dong} ${name}`);
-  return `<a href="https://new.land.naver.com/search?sk=${q}" target="_blank" rel="noopener" class="ext">매물</a>`
+  const enc = encodeURIComponent;
+  return `<a href="#complex" onclick="cxOpen('${enc(region)}','${enc(dong)}','${enc(name)}');return false" class="ext ext-an">🔍 분석</a>`
+    + ` <a href="https://new.land.naver.com/search?sk=${q}" target="_blank" rel="noopener" class="ext">매물</a>`
     + ` <a href="https://hogangnono.com/search?q=${q}" target="_blank" rel="noopener" class="ext">호갱노노</a>`
     + ` <a href="https://map.naver.com/p/search/${full}" target="_blank" rel="noopener" class="ext">지도</a>`;
 }
@@ -139,52 +144,22 @@ function renderRegionRecs(scopeKey) {
   }
 }
 
-let mapInstance = null;
-async function initMap(cx) {
-  if (typeof L === 'undefined') return;
-  const all = [
-    ...(cx.within || []).map((c) => ({ ...c, grp: 'within' })),
-    ...(cx.stretch || []).map((c) => ({ ...c, grp: 'stretch' })),
-  ].slice(0, 15);
-  if (!all.length) return;
-
-  const dongs = [...new Set(all.map((c) => c.dong).filter(Boolean))];
-  const items = dongs.map((d, i) => ({ id: i, region: cx.regionName, dong: d }));
-  let coords;
+// 분석 탭 지도: 목표 지역 전체 단지를 내 예산 기준으로 색칠
+let AN_MAP_REGION = '';
+async function anMapLoad() {
+  if (!AN_MAP_REGION || typeof L === 'undefined') return;
+  const card = document.getElementById('mapCard');
+  card.hidden = false;
+  const band = document.getElementById('mapBand').value;
+  const onlyOk = document.getElementById('mapOnlyOk').checked;
+  document.getElementById('mapSub').textContent = '불러오는 중…';
   try {
-    coords = await apiFetch('/api/real-estate/geo/batch', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items }),
-    });
-  } catch (e) { return; }
-
-  const byDong = {};
-  coords.forEach((g) => { if (g.lat != null) byDong[dongs[g.id]] = g; });
-  if (!Object.keys(byDong).length) return;
-
-  document.getElementById('mapCard').hidden = false;
-  if (mapInstance) { mapInstance.remove(); mapInstance = null; }
-  const map = L.map('map', { scrollWheelZoom: false });
-  mapInstance = map;
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
-
-  const pts = [];
-  const used = {};
-  all.forEach((c) => {
-    const g = byDong[c.dong];
-    if (!g) return;
-    const n = used[c.dong] = (used[c.dong] || 0) + 1;
-    const ang = n * 2.4;
-    const lat = g.lat + (n > 1 ? Math.sin(ang) * 0.002 : 0);
-    const lon = g.lon + (n > 1 ? Math.cos(ang) * 0.0025 : 0);
-    const color = c.grp === 'within' ? '#0e9f6e' : '#c27803';
-    L.circleMarker([lat, lon], { radius: 9, color: '#fff', fillColor: color, fillOpacity: .95, weight: 2 })
-      .addTo(map)
-      .bindPopup(`<b>${c.name}</b> <small>${c.type || '아파트'}</small><br>${c.dong} · 중위 ${fmtMoney(c.medianPrice)}<br>${extLinks(cx.regionName, c.dong, c.name)}`);
-    pts.push([lat, lon]);
-  });
-  if (pts.length) map.fitBounds(pts, { padding: [36, 36], maxZoom: 15 });
+    const data = await cxFetchMap({ region: AN_MAP_REGION, band });
+    document.getElementById('mapSub').textContent = `${data.region} · ${BAND_LABEL[band]} · ${data.total}개 단지`;
+    drawComplexMap('map', data, { onlyOk, legendId: 'mapLegend', listId: 'mapList', listN: 8 });
+  } catch (e) {
+    document.getElementById('mapSub').textContent = '단지 지도 데이터 준비 중 (다음 수집 사이클)';
+  }
 }
 
 function renderScenarios(list) {
@@ -333,8 +308,12 @@ function renderAnalysis(r) {
         ${moreBtn('cxStretchT', cx.stretch.length - 4)}`;
     }
     document.getElementById('complexWithin').innerHTML = html;
-    initMap(cx);
   }
+  // 단지 지도 (추천·구매 가능 여부) — 추천 단지가 없어도 지역 전체를 보여줌
+  AN_MAP_REGION = (cx && cx.regionName) || rd.name;
+  const pband = (getProfile() || {}).areaBand;
+  if (pband && BAND_LABEL[pband]) document.getElementById('mapBand').value = pband;
+  anMapLoad();
 
   const rg = rec.regions;
   if (rg && rg.affordable?.length) {
@@ -423,6 +402,281 @@ function renderAnalysis(r) {
   document.getElementById('actionList').innerHTML = (d.actions || []).map((x) => `<li>${x}</li>`).join('');
   document.getElementById('warnList').innerHTML = (d.warnings || []).map((x) => `<li>${x.replace(/^•\s*/, '')}</li>`).join('');
 }
+
+/* ═══════════ 단지 조회 · 단지 지도 ═══════════ */
+const BAND_LABEL = { small: '소형 (~60㎡)', mid84: '국민평형 (60~85㎡)', large: '중대형 (85~135㎡)', xlarge: '대형 (135㎡~)', any: '전체 평형' };
+const ST_COLOR = { possible: '#0e9f6e', tight: '#c27803', hard: '#d64545', unknown: '#7b8794' };
+const ST_LABEL = { possible: '구매 가능', tight: '빠듯함', hard: '예산 초과', unknown: '판정 불가' };
+const scoreCls = (sc) => sc >= 75 ? 's3' : sc >= 60 ? 's2' : sc >= 45 ? 's1' : 's0';
+const CX_MAP_CACHE = {};
+let CX_CUR = null; // 현재 열려 있는 단지 {region, dong, name}
+
+function profileForApi() {
+  const p = getProfile();
+  if (!p || !p.salaryAmount) return null;
+  return { salaryAmount: p.salaryAmount, savingsAmount: p.savingsAmount, jeonseDeposit: p.jeonseDeposit, currentHome: p.currentHome, family: p.family, childrenCount: p.childrenCount };
+}
+async function cxFetchMap({ region, band, dong }) {
+  const key = `${region}|${band}|${dong || ''}|${JSON.stringify(profileForApi())}`;
+  if (CX_MAP_CACHE[key]) return CX_MAP_CACHE[key];
+  const data = await apiFetch('/api/real-estate/complex/map', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ region, band, dong, profile: profileForApi(), limit: 500 }),
+  });
+  CX_MAP_CACHE[key] = data;
+  return data;
+}
+
+function cxInit() {
+  const p = getProfile() || {};
+  const inp = document.getElementById('cxMapRegion');
+  if (!inp.value) inp.value = p.region || '서울 강서구';
+  if (p.areaBand && BAND_LABEL[p.areaBand]) document.getElementById('cxMapBand').value = p.areaBand;
+  if (!CX_CUR) cxMapLoad();
+}
+
+/* ── 검색 ── */
+async function cxSearch() {
+  const q = document.getElementById('cxQuery').value.trim();
+  const box = document.getElementById('cxResults');
+  if (!q) return;
+  box.innerHTML = '<p class="muted">검색 중…</p>';
+  try {
+    const rows = await apiFetch('/api/real-estate/complex/search?q=' + encodeURIComponent(q));
+    if (!rows.length) { box.innerHTML = '<p class="muted">최근 6개월 실거래에 없는 단지입니다. 동 이름을 붙이거나 다른 표기(예: "동아3" / "동아3차")로 시도해보세요.</p>'; return; }
+    box.innerHTML = rows.map((r) => `
+      <div class="cx-result" onclick="cxOpen('${encodeURIComponent(r.region)}','${encodeURIComponent(r.dong)}','${encodeURIComponent(r.name)}')">
+        <div><span class="nm">${esc(r.name)}</span> <span class="mt">${esc(r.region)} ${esc(r.dong)}${r.buildYear ? ' · ' + r.buildYear + '년' : ''}</span></div>
+        <div class="mt" style="text-align:right;white-space:nowrap"><b style="color:var(--ink)">${fmtMoney(r.medianPrice)}</b><br>6개월 ${r.count}건</div>
+      </div>`).join('');
+    if (rows.length === 1) cxOpen(encodeURIComponent(rows[0].region), encodeURIComponent(rows[0].dong), encodeURIComponent(rows[0].name));
+  } catch (e) {
+    box.innerHTML = `<p class="muted">검색 실패: ${esc(e.message)} — 단지 인덱스는 매일 새벽 수집 때 생성됩니다.</p>`;
+  }
+}
+
+/* ── 상세 ── */
+async function cxOpen(regionEnc, dongEnc, nameEnc) {
+  const region = decodeURIComponent(regionEnc), dong = decodeURIComponent(dongEnc), name = decodeURIComponent(nameEnc);
+  CX_CUR = { region, dong, name };
+  switchTab('complex');
+  const det = document.getElementById('cxDetail');
+  det.hidden = false;
+  det.innerHTML = '<div class="card"><div class="spinner"></div><p style="text-align:center" class="muted">실거래 분석 중…</p></div>';
+  det.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  try {
+    const d = await apiFetch('/api/real-estate/complex/detail', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region, dong, name, profile: profileForApi() }),
+    });
+    cxRenderDetail(d);
+    // 지도: 같은 동 → 포커스
+    document.getElementById('cxMapRegion').value = d.region;
+    const mainUnit = d.units[0];
+    if (mainUnit) {
+      const b = mainUnit.area <= 60 ? 'small' : mainUnit.area <= 85 ? 'mid84' : mainUnit.area <= 135 ? 'large' : 'xlarge';
+      document.getElementById('cxMapBand').value = b;
+    }
+    cxMapLoad({ focus: d });
+  } catch (e) {
+    det.innerHTML = `<div class="card"><div class="error-box">${esc(e.message)}</div></div>`;
+  }
+}
+
+function cxRenderDetail(d) {
+  const cap = d.capital;
+  const links = extLinks(d.region, d.dong, d.name);
+  const capLine = cap
+    ? `내 기준: 자기자금 <b>${fmtMoney(cap.own)}</b> · 연소득 <b>${fmtMoney(cap.income)}</b> · ${cap.currentHome === 'multi' ? '다주택 (추가 주담대 불가)' : '주담대 LTV·DSR·가격구간 상한 적용'} · ${d.regulation.asOf} 규제 · 금리 ${d.regulation.rate}%`
+    : `<a href="#profile" onclick="switchTab('profile');return false"><b>내 정보</b></a>를 입력하면 이 단지를 살 수 있는지(대출·월상환 포함) 판정해드립니다.`;
+
+  const unitHtml = d.units.map((u) => {
+    const j = u.judge || {};
+    const st = j.status || 'unknown';
+    const money = st === 'unknown' ? '' : `
+      ${kv('내 최대 예산 (이 가격대 기준)', fmtMoney(j.budget))}
+      ${kv('필요 대출', fmtMoney(j.loanNeeded) + (j.loanNeeded > j.maxLoan ? ` <span class="warn-text">(한도 ${fmtMoney(j.maxLoan)})</span>` : ''))}
+      ${kv('월 상환 (30년·' + d.regulation.rate + '%)', fmtMoney(j.monthly))}
+      ${j.shortfall > 0 ? kv('부족 자금', `<span class="warn-text"><b>${fmtMoney(j.shortfall)}</b></span>`) : kv('예산 충족률', `<b>${j.ratio}%</b>`)}`;
+    const trades = u.trades.map((t) => `<tr><td>${t.date.slice(2)}</td><td>${t.floor ?? '-'}층</td><td>${t.area}㎡</td><td><b>${fmtMoney(t.price)}</b></td><td>${fmtMoney(t.pp)}</td><td>${t.direct ? '<span class="badge hard">직거래</span>' : ''}</td></tr>`).join('');
+    const monthly = u.monthly.map((m) => `<td>${m.count ? `<b>${fmtMoney(m.pp)}</b><span class="minor">${m.count}건</span>` : '<span class="muted">-</span>'}</td>`).join('');
+    return `
+      <div class="unit ${st}">
+        <div class="unit-head">
+          <span class="py">전용 ${u.area}㎡ <span style="font-weight:500;font-size:14px;color:var(--sub)">(약 ${supplyPyeong(u.area)}평형)</span></span>
+          <span class="badge ${st}" style="margin:0">${ST_LABEL[st]}</span>
+          <span class="score-pill ${scoreCls(u.score)}">${esc(u.label)} · ${u.score}점</span>
+          <span class="muted">6개월 ${u.count}건</span>
+        </div>
+        <div class="why">${u.why.map((w) => `<span>✓ ${esc(w)}</span>`).join('')}${u.neg.map((w) => `<span class="neg">! ${esc(w)}</span>`).join('')}</div>
+        <div class="unit-grid">
+          <div>
+            ${kv('실거래 중위가', `<span class="big">${fmtMoney(u.median)}</span>`)}
+            ${kv('범위 (최저~최고)', `${fmtMoney(u.min)} ~ ${fmtMoney(u.max)}`)}
+            ${kv('평당가 (전용)', fmtMoney(u.pp) + (u.relPP != null ? ` <span class="${u.relPP > 0 ? 'warn-text' : ''}" style="font-size:12px">동네 ${u.relPP > 0 ? '+' : ''}${u.relPP}%</span>` : ''))}
+            ${u.trend != null ? kv('최근 3개월 vs 이전 3개월', `<span class="${u.trend > 1 ? 'up' : u.trend < -1 ? 'down' : ''}">${u.trend > 0 ? '+' : ''}${u.trend}%</span>`) : ''}
+            ${u.jeonseMedian ? kv('전세 중위 (최근 2개월 ' + u.jeonseCount + '건)', `${fmtMoney(u.jeonseMedian)} <span class="muted">전세가율 ${u.jeonseRatio}%</span>`) : kv('전세 체결 (최근 2개월)', '<span class="muted">없음</span>')}
+          </div>
+          <div>${money}</div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px"><table>
+          <tr>${u.monthly.map((m) => `<th>${m.month.slice(2)}</th>`).join('')}</tr>
+          <tr>${monthly}</tr>
+        </table></div>
+        <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">최근 체결 ${u.trades.length}건 보기</summary>
+          <div class="table-wrap"><table><tr><th>일자</th><th>층</th><th>전용</th><th>가격</th><th>평당</th><th></th></tr>${trades}</table></div>
+        </details>
+      </div>`;
+  }).join('');
+
+  const bg = d.bargains.length ? `
+    <div class="card">
+      <h2>🔥 이 단지 급매 체결 이력 <span class="sub">최근 2개월</span></h2>
+      <div class="table-wrap"><table><tr><th>일자</th><th>전용/층</th><th>체결가</th><th>할인율</th></tr>
+      ${d.bargains.map((b) => `<tr><td>${b.date.slice(5)}</td><td>${b.area}㎡ ${b.floor ?? '-'}층${b.direct ? ' <span class="badge hard">직거래</span>' : ''}</td><td><b>${fmtMoney(b.price)}</b></td><td><b style="color:var(--bad)">${b.discount}%</b></td></tr>`).join('')}
+      </table></div>
+      <p class="muted">급매가 터진 단지 = 그 가격을 앵커로 협상 가능. 단, 직거래·저층은 할인 사유 확인.</p>
+    </div>` : '';
+
+  const nb = d.neighbors.length ? `
+    <div class="card">
+      <h2>🏘 ${esc(d.dong)} 이웃 단지 비교 <span class="sub">${d.mainBucket != null ? '같은 평형대 기준' : '전체'} · 동네 평당 중위 ${fmtMoney(d.dongPP)}</span></h2>
+      <div class="table-wrap"><table id="cxNbT">
+        <tr><th>단지</th><th>전용</th><th>중위가</th><th>평당</th><th>동네 대비</th><th>6개월</th></tr>
+        <tr style="background:var(--brand-soft)"><td><b>${esc(d.name)}</b> <span class="minor">${d.buildYear ? d.buildYear + '년' : ''} · 이 단지</span></td><td>${d.units[0]?.area ?? '-'}㎡</td><td><b>${fmtMoney(d.units[0]?.median)}</b></td><td>${fmtMoney(d.units[0]?.pp)}</td><td class="${(d.relPP ?? 0) > 0 ? 'warn-text' : ''}">${d.relPP != null ? (d.relPP > 0 ? '+' : '') + d.relPP + '%' : '-'}</td><td>${d.tradeCount}건</td></tr>
+        ${d.neighbors.map((n, i) => `<tr class="${i >= 6 ? 'extra' : ''}" style="${n.sameBand ? '' : 'opacity:.6'}">
+          <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(d.region)}','${encodeURIComponent(d.dong)}','${encodeURIComponent(n.name)}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(n.name)}</b></a><span class="minor">${n.buildYear ? n.buildYear + '년' : ''}${n.sameBand ? '' : ' · 다른 평형만 거래'}</span></td>
+          <td>${n.area ? n.area + '㎡' : '-'}</td><td><b>${fmtMoney(n.medianPrice)}</b></td><td>${fmtMoney(n.pp)}</td>
+          <td class="${(n.relPP ?? 0) > 0 ? 'warn-text' : (n.relPP ?? 0) < 0 ? 'down' : ''}">${n.relPP != null ? (n.relPP > 0 ? '+' : '') + n.relPP + '%' : '-'}</td>
+          <td>${n.count}건${n.trend != null ? `<span class="minor ${n.trend > 1 ? 'up' : n.trend < -1 ? 'down' : ''}">${n.trend > 0 ? '+' : ''}${n.trend}%</span>` : ''}</td>
+        </tr>`).join('')}
+      </table></div>${moreBtn('cxNbT', d.neighbors.length - 6)}
+    </div>` : '';
+
+  document.getElementById('cxDetail').innerHTML = `
+    <div class="card">
+      <div class="cx-head">
+        <div>
+          <h2>🏢 ${esc(d.name)} <span class="badge">아파트</span></h2>
+          <p style="margin:4px 0 0;color:var(--sub);font-size:13.5px">${esc(d.region)} ${esc(d.dong)} ${esc(d.jibun)} · ${d.buildYear ? d.buildYear + '년 준공 (' + (new Date().getFullYear() - d.buildYear) + '년차)' : '준공년도 미상'} · 6개월 ${d.tradeCount}건 · ${links}</p>
+        </div>
+        <div class="notice" style="margin:0;max-width:420px">${capLine}</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>📐 평형별 판정 <span class="sub">전용면적 10㎡ 버킷 · 국토부 실거래 6개월</span></h2>
+      ${unitHtml || '<p class="muted">최근 6개월 실거래가 없습니다.</p>'}
+      ${d.rents.filter((r) => r.type === '월세').length ? `<p class="muted">월세 체결 ${d.rents.filter((r) => r.type === '월세').length}건 (최근 2개월): ${d.rents.filter((r) => r.type === '월세').slice(0, 3).map((r) => `${r.area}㎡ ${fmtMoney(r.deposit)}/${r.monthlyRent}만`).join(' · ')}</p>` : ''}
+    </div>
+    ${bg}${nb}`;
+}
+
+/* ── 지도 (공용) ── */
+const MAPS = {};
+function drawComplexMap(elId, data, opts = {}) {
+  if (typeof L === 'undefined') return;
+  const el = document.getElementById(elId);
+  if (MAPS[elId]) { MAPS[elId].remove(); delete MAPS[elId]; }
+  const map = L.map(el, { scrollWheelZoom: false });
+  MAPS[elId] = map;
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>', maxZoom: 18 }).addTo(map);
+
+  let items = data.items.filter((c) => c.lat != null);
+  if (opts.onlyOk) items = items.filter((c) => c.status === 'possible' || c.status === 'tight');
+  const focus = opts.focus;
+  const pts = [];
+  const order = { hard: 0, unknown: 1, tight: 2, possible: 3 };
+  items.slice().sort((a, b) => order[a.status] - order[b.status] || a.score - b.score).forEach((c) => {
+    const isFocus = focus && c.name === focus.name && c.dong === focus.dong;
+    const r = isFocus ? 14 : c.score >= 75 ? 11 : c.score >= 60 ? 9 : 7;
+    const m = L.circleMarker([c.lat, c.lon], {
+      radius: r, color: isFocus ? '#16202e' : '#fff', weight: isFocus ? 3 : 1.5,
+      fillColor: ST_COLOR[c.status] || ST_COLOR.unknown, fillOpacity: c.geo === 'approx' ? .6 : .95,
+      dashArray: c.geo === 'approx' ? '3 3' : null,
+    }).addTo(map);
+    m.bindTooltip(`${c.name} ${fmtMoney(c.price)}`, { className: 'cx-tip', direction: 'top', offset: [0, -r] });
+    m.bindPopup(cxPopup(data.region, c), { maxWidth: 300 });
+    pts.push([c.lat, c.lon]);
+  });
+
+  if (focus && focus.lat != null) {
+    L.circle([focus.lat, focus.lon], { radius: 90, color: '#1d4ed8', weight: 2, fill: false, className: 'focus-ring' }).addTo(map);
+    map.setView([focus.lat, focus.lon], 15);
+  } else if (pts.length) {
+    map.fitBounds(pts, { padding: [30, 30], maxZoom: 15 });
+  } else {
+    map.setView([37.5665, 126.978], 11);
+  }
+
+  const cnt = (st) => data.items.filter((c) => c.status === st).length;
+  const missing = data.total - data.located;
+  const hasCap = Boolean(data.capital);
+  document.getElementById(opts.legendId).innerHTML =
+    (hasCap
+      ? `<span><i class="dot" style="background:${ST_COLOR.possible}"></i>구매 가능 ${cnt('possible')}</span>
+         <span><i class="dot" style="background:${ST_COLOR.tight}"></i>빠듯 ${cnt('tight')}</span>
+         <span><i class="dot" style="background:${ST_COLOR.hard}"></i>예산 초과 ${cnt('hard')}</span>`
+      : `<span><i class="dot" style="background:${ST_COLOR.unknown}"></i>내 정보 입력 전 — 색은 판정 없음</span>`)
+    + `<span>● 크기 = 추천 점수</span>`
+    + `<span><i class="dot" style="background:#fff;border:2px dashed #999"></i>점선 = 동 중심 근사 위치</span>`
+    + (missing > 0 ? `<span class="muted">좌표 수집 중 ${missing}개 (표에서 확인)</span>` : '')
+    + (focus && focus.lat == null ? `<span class="warn-text">이 단지 좌표는 아직 수집 전 — 동 전체를 표시</span>` : '');
+
+  if (opts.listId) cxMapList(opts.listId, data, opts.listN || 10, opts.onlyOk);
+}
+
+function cxPopup(region, c) {
+  return `<div class="pp-head">${esc(c.name)} <span class="badge ${c.status}" style="margin-left:4px">${ST_LABEL[c.status]}</span></div>
+    <div class="muted">${esc(c.dong)} ${esc(c.jibun || '')} · ${c.buildYear ? c.buildYear + '년' : ''} · 전용 ${c.area ?? '-'}㎡${c.area ? ' (약 ' + supplyPyeong(c.area) + '평형)' : ''} ${c.areaCount ? c.areaCount + '건' : ''}</div>
+    <span class="score-pill ${scoreCls(c.score)}" style="margin:6px 0">${esc(c.label)} · ${c.score}점</span>
+    ${kv('실거래 중위', `<b>${fmtMoney(c.price)}</b>`)}
+    ${kv('범위', `${fmtMoney(c.min)}~${fmtMoney(c.max)}`)}
+    ${kv('평당가', fmtMoney(c.pp))}
+    ${c.status !== 'unknown' ? kv(c.shortfall > 0 ? '부족 자금' : '월 상환', c.shortfall > 0 ? `<span class="warn-text">${fmtMoney(c.shortfall)}</span>` : fmtMoney(c.monthly)) : ''}
+    ${kv('최근 체결', c.last)}
+    <div class="why">${(c.why || []).slice(0, 3).map((w) => `<span>✓ ${esc(w)}</span>`).join('')}${(c.neg || []).slice(0, 2).map((w) => `<span class="neg">! ${esc(w)}</span>`).join('')}</div>
+    <div style="margin-top:4px">${extLinks(region, c.dong, c.name)}</div>`;
+}
+
+function cxMapList(listId, data, n, onlyOk) {
+  let rows = data.items.slice();
+  if (onlyOk) rows = rows.filter((c) => c.status === 'possible' || c.status === 'tight');
+  const tid = listId + 'T';
+  document.getElementById(listId).innerHTML = rows.length ? `
+    <p style="font-size:13px;margin:12px 0 6px"><b>추천 순위</b> <span class="muted">— 점수 = 예산 적합 + 동네 대비 가격 + 거래량 + 추세 + 연식 + 급매 앵커</span></p>
+    <div class="table-wrap"><table id="${tid}">
+      <tr><th>#</th><th>단지</th><th>전용</th><th>중위가</th><th>판정</th><th>점수</th></tr>
+      ${rows.map((c, i) => `<tr class="${i >= n ? 'extra' : ''}">
+        <td>${i + 1}</td>
+        <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(data.region)}','${encodeURIComponent(c.dong)}','${encodeURIComponent(c.name)}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(c.name)}</b></a>${c.lat == null ? ' <span class="badge" title="좌표 수집 중">지도 X</span>' : ''}<span class="minor">${esc(c.dong)} · ${c.buildYear ? c.buildYear + '년 · ' : ''}${c.count}건${c.bargains ? ' · 급매 ' + c.bargains : ''}</span></td>
+        <td>${c.area ?? '-'}㎡${c.area ? `<span class="minor">${supplyPyeong(c.area)}평형</span>` : ''}</td>
+        <td><b>${fmtMoney(c.price)}</b>${c.shortfall > 0 ? `<span class="minor warn-text">부족 ${fmtMoney(c.shortfall)}</span>` : c.monthly ? `<span class="minor">월 ${fmtMoney(c.monthly)}</span>` : ''}</td>
+        <td><span class="badge ${c.status}" style="margin:0">${ST_LABEL[c.status]}</span></td>
+        <td><span class="score-pill ${scoreCls(c.score)}">${c.score}</span><span class="minor">${esc(c.label)}</span></td>
+      </tr>`).join('')}
+    </table></div>${moreBtn(tid, rows.length - n)}` : '<p class="muted">조건에 맞는 단지가 없습니다.</p>';
+}
+
+async function cxMapLoad(opts = {}) {
+  const region = document.getElementById('cxMapRegion').value.trim();
+  const band = document.getElementById('cxMapBand').value;
+  const onlyOk = document.getElementById('cxMapOnlyOk').checked;
+  if (!region) return;
+  const sub = document.getElementById('cxMapSub');
+  sub.textContent = '불러오는 중…';
+  try {
+    const focus = opts.focus || (CX_CUR && CX_CUR.region === region ? CX_CUR : null);
+    const data = await cxFetchMap({ region, band });
+    sub.textContent = `${data.region} · ${BAND_LABEL[band]} · ${data.total}개 단지 · 좌표 ${data.located}개`;
+    drawComplexMap('cxMap', data, { onlyOk, focus, legendId: 'cxMapLegend', listId: 'cxMapList', listN: 10 });
+  } catch (e) {
+    sub.textContent = '';
+    document.getElementById('cxMapLegend').innerHTML = `<span class="warn-text">${esc(e.message)} — 단지 지도 데이터는 매일 새벽 수집 때 생성됩니다.</span>`;
+  }
+}
+['cxMapBand', 'cxMapOnlyOk'].forEach((id) => document.getElementById(id).addEventListener('change', () => cxMapLoad()));
+document.getElementById('cxMapRegion').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); cxMapLoad(); } });
 
 /* ═══════════ 레이더 ═══════════ */
 const RD_SCOPES = {

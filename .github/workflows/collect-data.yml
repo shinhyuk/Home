@@ -8,7 +8,7 @@ on:
     - cron: '0 18 * * *'   # 매일 03:00 KST
   workflow_dispatch:
   push:
-    paths: ['backend/scripts/collect.js', '.github/workflows/collect-data.yml']
+    paths: ['backend/scripts/collect.js', 'backend/scripts/geocode.js', '.github/workflows/collect-data.yml']
 
 permissions:
   contents: write
@@ -31,6 +31,7 @@ jobs:
       - name: Collect
         env:
           MOLIT_API_KEY: ${{ secrets.MOLIT_API_KEY }}
+          VWORLD_API_KEY: ${{ secrets.VWORLD_API_KEY }}   # 선택: 있으면 단지 핀이 지번 정확 위치
         run: node backend/scripts/collect.js out
       - name: Publish to data branch
         run: |

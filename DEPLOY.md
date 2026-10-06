@@ -39,3 +39,17 @@ https://ormhome-backend-sirl.onrender.com/api/real-estate/regions → 지역 목
 ```
 
 프론트(https://shinhyuk.github.io/Home/)에서 정보 입력 → 분석이 되면 끝.
+
+## 단지 좌표 (지도 핀) 정확도 — VWorld 키 (선택)
+
+단지 지도의 핀 위치는 매일 수집 때 아래 순서로 채워집니다.
+
+1. **VWorld 지오코더** (국토부 공간정보 오픈플랫폼) — 지번 주소 → 정확한 위치. `VWORLD_API_KEY` 시크릿이 있을 때만.
+2. OpenStreetMap(Overpass) — 동 범위 안의 이름 있는 아파트와 단지명 매칭
+3. 동 중심 근사 위치 (지도에 점선 핀으로 표시)
+
+정확한 핀을 원하면:
+1. https://www.vworld.kr 회원가입 → 마이페이지 → **오픈API 인증키 발급** (서비스 URL은 `https://shinhyuk.github.io` 로)
+2. GitHub 저장소 → Settings → Secrets and variables → Actions → **New repository secret**
+   - Name: `VWORLD_API_KEY`, Value: 발급받은 키
+3. 다음 새벽 수집부터 자동 반영 (하루 최대 4,000단지씩 정확 위치로 교체)

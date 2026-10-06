@@ -352,6 +352,7 @@ async function getAllRegionSummaries() {
 
 module.exports = {
   AREA_BANDS,
+  inBand,
   getBandedStats,
   getRegionSummary,
   getPriceTrend,
@@ -359,5 +360,6 @@ module.exports = {
   getComplexStats,
   getAllRegionSummaries,
   fetchMonthCached,
+  recentMonths,
   listRegions,
 };

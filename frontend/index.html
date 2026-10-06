@@ -23,6 +23,7 @@
       <button type="button" class="tab-btn" data-tab="home" onclick="switchTab('home')">📊 홈</button>
       <button type="button" class="tab-btn" data-tab="profile" onclick="switchTab('profile')">📝 내 정보</button>
       <button type="button" class="tab-btn" data-tab="analysis" onclick="switchTab('analysis')">🎯 분석</button>
+      <button type="button" class="tab-btn" data-tab="complex" onclick="switchTab('complex')">🏢 단지</button>
       <button type="button" class="tab-btn" data-tab="radar" onclick="switchTab('radar')">🔭 레이더</button>
       <button type="button" class="tab-btn" data-tab="bargains" onclick="switchTab('bargains')">🔥 급매</button>
     </nav>
@@ -40,6 +41,7 @@
       <div class="card" style="margin-top:16px">
         <h2>로그인 없이 바로 볼 수 있는 것</h2>
         <div class="btn-row">
+          <button type="button" class="btn-ghost" onclick="switchTab('complex')">🏢 단지 조회</button>
           <button type="button" class="btn-ghost" onclick="switchTab('radar')">🔭 전국 투자 레이더</button>
           <button type="button" class="btn-ghost" onclick="switchTab('bargains')">🔥 오늘의 급매 체결</button>
         </div>
@@ -52,6 +54,13 @@
           <div id="profileChip" style="font-size:13.5px;color:var(--sub)"></div>
           <button type="button" class="mini-btn" onclick="switchTab('profile')">수정</button>
         </div>
+      </div>
+
+      <div class="card" style="padding:14px 18px">
+        <form class="cx-search" onsubmit="event.preventDefault();document.getElementById('cxQuery').value=this.q.value;switchTab('complex');cxSearch();">
+          <input name="q" placeholder="🏢 단지명 조회 — 예: 강변힐스테이트, 염창동 힐스테이트" autocomplete="off">
+          <button type="submit" class="mini-btn" style="padding:10px 16px;font-size:13.5px">실거래 분석</button>
+        </form>
       </div>
 
       <div class="card hero" id="homeStrategy">
@@ -246,13 +255,20 @@
       </div>
 
       <div class="card" id="mapCard" hidden>
-        <h2>🗺 추천 단지 위치 한눈에</h2>
-        <div id="map" style="height:400px;border-radius:10px;z-index:0"></div>
-        <p class="muted" style="margin-top:8px">
-          <span style="color:var(--good)">●</span> 예산 내
-          <span style="color:var(--warn);margin-left:10px">●</span> 조금 더 모으면
-          · 동 단위 대표 위치 · 핀을 누르면 네이버지도로 이동
-        </p>
+        <h2>🗺 단지 지도 — 추천 · 구매 가능 여부 <span class="sub" id="mapSub"></span></h2>
+        <div class="map-ctl">
+          <select id="mapBand" onchange="anMapLoad()">
+            <option value="small">소형 (~60㎡)</option>
+            <option value="mid84" selected>국민평형 (60~85㎡)</option>
+            <option value="large">중대형 (85~135㎡)</option>
+            <option value="xlarge">대형 (135㎡~)</option>
+            <option value="any">전체 평형</option>
+          </select>
+          <label class="chk"><input type="checkbox" id="mapOnlyOk" onchange="anMapLoad()"> 구매 가능만</label>
+        </div>
+        <div id="map" class="cx-map"></div>
+        <div class="map-legend" id="mapLegend"></div>
+        <div id="mapList"></div>
       </div>
 
       <div class="card" id="regionRecCard" hidden>
@@ -296,6 +312,40 @@
       </div>
       <button type="button" class="btn-ghost" onclick="switchTab('profile')">← 정보 수정하고 다시 분석</button>
     </div>
+  </div>
+  </section>
+
+  <!-- ═══════════ 단지 조회 ═══════════ -->
+  <section class="tabview" id="tab-complex">
+  <div class="card">
+    <h2>🏢 단지 조회 <span class="sub">단지명만 치면 실거래 분석 + 내 예산으로 살 수 있는지 즉시 판정</span></h2>
+    <form class="cx-search" onsubmit="event.preventDefault();cxSearch()">
+      <input id="cxQuery" placeholder="예: 강변힐스테이트 / 염창동 힐스테이트 / 분당 시범단지" autocomplete="off">
+      <button type="submit" class="mini-btn" id="cxSearchBtn" style="padding:10px 18px;font-size:13.5px">검색</button>
+    </form>
+    <p class="muted" style="margin:8px 0 0">동 이름이나 구 이름을 같이 쓰면 더 정확합니다 (예: "염창동 힐스테이트"). 호갱노노·네이버 보다가 바로 확인하는 용도.</p>
+    <div id="cxResults" style="margin-top:12px"></div>
+  </div>
+
+  <div id="cxDetail" hidden></div>
+
+  <div class="card" id="cxMapCard">
+    <h2>🗺 단지 지도 — 추천 · 구매 가능 여부 <span class="sub" id="cxMapSub"></span></h2>
+    <div class="map-ctl">
+      <input id="cxMapRegion" list="regionList" placeholder="지역 (예: 강서구, 염창동, 분당)" style="flex:1.4;min-width:150px">
+      <select id="cxMapBand">
+        <option value="small">소형 (~60㎡)</option>
+        <option value="mid84" selected>국민평형 (60~85㎡)</option>
+        <option value="large">중대형 (85~135㎡)</option>
+        <option value="xlarge">대형 (135㎡~)</option>
+        <option value="any">전체 평형</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="cxMapOnlyOk"> 구매 가능만</label>
+      <button type="button" class="mini-btn" style="padding:10px 16px;font-size:13.5px" onclick="cxMapLoad()">지도 보기</button>
+    </div>
+    <div id="cxMap" class="cx-map"></div>
+    <div class="map-legend" id="cxMapLegend"></div>
+    <div id="cxMapList"></div>
   </div>
   </section>
 

@@ -615,4 +615,6 @@ module.exports = {
   calculateScores,
   simulateLoan,
   maxLoanCapacity,
+  monthlyPayment,
+  normalizeInput,
 };

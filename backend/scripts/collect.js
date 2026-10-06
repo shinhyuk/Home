@@ -68,6 +68,9 @@ async function main() {
   fs.writeFileSync(path.join(outDir, 'bargains.json'), JSON.stringify(bargains));
   console.log(`급매 탐지: ${bargains.items.length}건`);
 
+  // 단지 인덱스 (단지 조회·지도용) + 좌표 증분 수집
+  await buildComplexes(outDir, bargains);
+
   fs.writeFileSync(path.join(outDir, 'meta.json'), JSON.stringify({
     collectedAt: new Date().toISOString(),
     files: ok,
@@ -208,4 +211,164 @@ function buildBargains(outDir) {
   return { generatedAt: new Date().toISOString(), basis: '단지 6개월 평당 중위가 대비, 최근 2개월 체결', items: items.slice(0, 800) };
 }
 
-main();
+// ───────────────────────── 단지 인덱스 + 좌표 ─────────────────────────
+
+// 지역별 단지 집계 (아파트 6개월 매매): 평형 버킷(10㎡)별 통계 포함
+function collectComplexes(outDir) {
+  const nameByCode = {};
+  for (const [name, code] of Object.entries(LAWD_CODES)) {
+    if (!nameByCode[code]) nameByCode[code] = name;
+  }
+  const months6 = recentMonths(6); // 최신순
+  const half = new Set(months6.slice(0, 3));
+  const byRegion = {};
+
+  for (const [code, region] of Object.entries(nameByCode)) {
+    const groups = new Map();
+    for (const ym of months6) {
+      for (const i of readJson(path.join(outDir, 'apt-trade', code, `${ym}.json`))) {
+        if (i.cancelled || !(i.dealAmount > 0) || !(i.area > 0) || !i.name) continue;
+        const key = `${i.name}|${i.dong}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({ ...i, ym, pp: i.dealAmount / (i.area / PYEONG) });
+      }
+    }
+    const list = [];
+    for (const [key, trades] of groups) {
+      const [name, dong] = key.split('|');
+      const amounts = trades.map((t) => t.dealAmount).sort((a, b) => a - b);
+      const pps = trades.map((t) => Math.round(t.pp)).sort((a, b) => a - b);
+      trades.sort((a, b) => (b.dealYear * 10000 + b.dealMonth * 100 + b.dealDay) - (a.dealYear * 10000 + a.dealMonth * 100 + a.dealDay));
+
+      // 평형 버킷
+      const buckets = {};
+      for (const t of trades) {
+        const b = Math.round(t.area / 10);
+        if (!buckets[b]) buckets[b] = { trades: [] };
+        buckets[b].trades.push(t);
+      }
+      const bk = {};
+      for (const [b, v] of Object.entries(buckets)) {
+        const am = v.trades.map((t) => t.dealAmount).sort((x, y) => x - y);
+        const ar = v.trades.map((t) => t.area).sort((x, y) => x - y);
+        const pp = v.trades.map((t) => Math.round(t.pp)).sort((x, y) => x - y);
+        const last = v.trades[0];
+        bk[b] = {
+          count: v.trades.length,
+          area: Math.round(median(ar) * 10) / 10,
+          median: median(am), min: am[0], max: am[am.length - 1],
+          pp: median(pp),
+          last: `${last.dealYear}-${String(last.dealMonth).padStart(2, '0')}-${String(last.dealDay).padStart(2, '0')}`,
+          lastPrice: last.dealAmount,
+        };
+      }
+
+      // 추세: 최근 3개월 vs 이전 3개월 평당 중위 (각 3건 이상일 때)
+      const recentPP = trades.filter((t) => half.has(t.ym)).map((t) => Math.round(t.pp)).sort((a, b) => a - b);
+      const olderPP = trades.filter((t) => !half.has(t.ym)).map((t) => Math.round(t.pp)).sort((a, b) => a - b);
+      let trend = null;
+      if (recentPP.length >= 3 && olderPP.length >= 3) {
+        trend = Math.round(((median(recentPP) - median(olderPP)) / median(olderPP)) * 1000) / 10;
+      }
+
+      const last = trades[0];
+      list.push({
+        name, dong,
+        jibun: trades.find((t) => t.jibun)?.jibun || '',
+        buildYear: trades.find((t) => t.buildYear)?.buildYear || null,
+        count: trades.length,
+        medianPrice: median(amounts),
+        minPrice: amounts[0], maxPrice: amounts[amounts.length - 1],
+        pp: median(pps),
+        trend,
+        last: `${last.dealYear}-${String(last.dealMonth).padStart(2, '0')}-${String(last.dealDay).padStart(2, '0')}`,
+        buckets: bk,
+      });
+    }
+    list.sort((a, b) => b.count - a.count);
+    byRegion[code] = { region, code, complexes: list };
+  }
+  return byRegion;
+}
+
+// 이름 해시 → 동 중심 근사 좌표 흩뿌리기 (같은 동 단지들이 겹치지 않게)
+function jitter(name, lat, lon) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const ang = (h % 360) * Math.PI / 180;
+  const r = 0.0012 + (h % 7) * 0.0004;
+  return { lat: lat + Math.sin(ang) * r, lon: lon + Math.cos(ang) * r * 1.25 };
+}
+
+function writeComplexIndex(outDir, byRegion, geo, bargains) {
+  const bgCount = new Map();
+  for (const b of bargains.items) {
+    const code = Object.entries(LAWD_CODES).find(([n]) => n === b.region)?.[1];
+    if (!code) continue;
+    const k = `${code}|${b.dong}|${b.name}`;
+    bgCount.set(k, (bgCount.get(k) || 0) + 1);
+  }
+
+  const dir = path.join(outDir, 'complexes');
+  fs.mkdirSync(dir, { recursive: true });
+  const index = [];
+  let located = 0, total = 0;
+  for (const [code, data] of Object.entries(byRegion)) {
+    for (const c of data.complexes) {
+      total++;
+      const g = geo.complexes[`${code}|${c.dong}|${c.name}`];
+      if (g && g.lat) {
+        const pt = g.src === 'dong' ? jitter(c.name, g.lat, g.lon) : g;
+        c.lat = Math.round(pt.lat * 1e6) / 1e6;
+        c.lon = Math.round(pt.lon * 1e6) / 1e6;
+        c.geo = g.src === 'vworld' ? 'exact' : g.src === 'osm' ? 'osm' : 'approx';
+        located++;
+      }
+      c.bargains = bgCount.get(`${code}|${c.dong}|${c.name}`) || 0;
+      index.push([code, c.dong, c.name, c.count, c.medianPrice, c.buildYear || 0]);
+    }
+    fs.writeFileSync(path.join(dir, `${code}.json`), JSON.stringify({ ...data, generatedAt: new Date().toISOString() }));
+  }
+  fs.writeFileSync(path.join(outDir, 'complex-index.json'), JSON.stringify({
+    generatedAt: new Date().toISOString(), fields: ['code', 'dong', 'name', 'count', 'medianPrice', 'buildYear'], items: index,
+  }));
+  return { total, located };
+}
+
+async function buildComplexes(outDir, bargains) {
+  const byRegion = collectComplexes(outDir);
+  const flat = [];
+  for (const [code, data] of Object.entries(byRegion)) {
+    for (const c of data.complexes) flat.push({ code, region: data.region, dong: c.dong, name: c.name, jibun: c.jibun, count: c.count });
+  }
+
+  // 이전 geo.json 가져오기 (data 브랜치) → 증분 지오코딩
+  let prev = { dongs: {}, complexes: {} };
+  const base = process.env.STATIC_DATA_BASE || 'https://raw.githubusercontent.com/shinhyuk/Home/data';
+  try {
+    const axios = require('axios');
+    const res = await axios.get(`${base}/geo.json`, { timeout: 20000 });
+    if (res.data && res.data.complexes) prev = res.data;
+  } catch (e) {
+    console.log('이전 geo.json 없음 (첫 실행이거나 로드 실패):', e.message);
+  }
+
+  let geo = prev;
+  if (process.env.SKIP_GEOCODE !== '1') {
+    try {
+      const { geocodeComplexes } = require('./geocode');
+      geo = await geocodeComplexes(flat, prev, {
+        budgetMs: Number(process.env.GEOCODE_BUDGET_MS) || 25 * 60 * 1000,
+      });
+    } catch (e) {
+      console.error('지오코딩 실패 (이전 좌표 유지):', e.message);
+    }
+  }
+  fs.writeFileSync(path.join(outDir, 'geo.json'), JSON.stringify(geo));
+
+  const stat = writeComplexIndex(outDir, byRegion, geo, bargains);
+  console.log(`단지 인덱스: ${stat.total}개 단지, 좌표 보유 ${stat.located}개`);
+}
+
+if (require.main === module) main();
+module.exports = { buildSummary, buildBargains, buildComplexes, recentMonths };

@@ -74,6 +74,47 @@ router.get('/trend/:region', async (req, res) => {
   }
 });
 
+// ── 단지 조회 ──
+const complexService = require('../services/complexService');
+
+// GET /api/real-estate/complex/search?q=염창동 강변힐스테이트&region=
+router.get('/complex/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().slice(0, 60);
+    if (!q.trim()) return res.json([]);
+    res.json(await complexService.searchComplexes(q, req.query.region, 30));
+  } catch (error) {
+    console.error('단지 검색 오류:', error.message);
+    res.status(503).json({ error: '단지 인덱스를 불러오지 못했습니다 (다음 수집 사이클에 생성)' });
+  }
+});
+
+// POST /api/real-estate/complex/detail  { region, dong, name, profile }
+router.post('/complex/detail', async (req, res) => {
+  try {
+    const { region, dong, name, profile } = req.body || {};
+    if (!region || !name) return res.status(400).json({ error: 'region, name 필요' });
+    const data = await complexService.complexDetail({ region, dong: dong || '', name, profile });
+    if (data.error) return res.status(404).json(data);
+    res.json(data);
+  } catch (error) {
+    console.error('단지 상세 오류:', error);
+    res.status(500).json({ error: '단지 상세 조회 실패', detail: error.message });
+  }
+});
+
+// POST /api/real-estate/complex/map  { region, dong?, band, profile, limit }
+router.post('/complex/map', async (req, res) => {
+  try {
+    const data = await complexService.mapComplexes(req.body || {});
+    if (data.error) return res.status(404).json(data);
+    res.json(data);
+  } catch (error) {
+    console.error('단지 지도 오류:', error);
+    res.status(500).json({ error: '단지 지도 조회 실패', detail: error.message });
+  }
+});
+
 // POST /api/real-estate/geo/batch - 단지 좌표 조회 (최대 20건, 캐시됨)
 router.post('/geo/batch', async (req, res) => {
   try {

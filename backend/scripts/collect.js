@@ -11,10 +11,12 @@ const { clusterAreas } = require('../lib/areaCluster');
 
 // 수집 범위: 분석 엔진이 실제로 쓰는 (유형 × 개월수)
 const PLAN = [
-  { type: 'apt-trade', months: 12 }, // 추세 분석 6개월 + 단지 조회(세부 평형) 1년
+  { type: 'apt-trade', months: 12 },  // 추세 분석 6개월 + 단지 조회(세부 평형) 1년
   { type: 'apt-rent', months: 2 },
-  { type: 'offi-trade', months: 2 },
-  { type: 'rh-trade', months: 2 },
+  { type: 'offi-trade', months: 12 }, // 단지 조회 유형 필터용
+  { type: 'offi-rent', months: 2 },
+  { type: 'rh-trade', months: 12 },
+  { type: 'rh-rent', months: 2 },
 ];
 
 function recentMonths(n) {
@@ -224,19 +226,22 @@ function collectComplexes(outDir) {
   const half = new Set(months12.slice(0, 6)); // 최근 6개월
   const byRegion = {};
 
+  const SOURCES = { apt: 'apt-trade', offi: 'offi-trade', rh: 'rh-trade' };
   for (const [code, region] of Object.entries(nameByCode)) {
     const groups = new Map();
-    for (const ym of months12) {
-      for (const i of readJson(path.join(outDir, 'apt-trade', code, `${ym}.json`))) {
-        if (i.cancelled || !(i.dealAmount > 0) || !(i.area > 0) || !i.name) continue;
-        const key = `${i.name}|${i.dong}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push({ ...i, ym, pp: i.dealAmount / (i.area / PYEONG) });
+    for (const [type, src] of Object.entries(SOURCES)) {
+      for (const ym of months12) {
+        for (const i of readJson(path.join(outDir, src, code, `${ym}.json`))) {
+          if (i.cancelled || !(i.dealAmount > 0) || !(i.area > 0) || !i.name) continue;
+          const key = `${type}|${i.name}|${i.dong}`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push({ ...i, ym, pp: i.dealAmount / (i.area / PYEONG) });
+        }
       }
     }
     const list = [];
     for (const [key, trades] of groups) {
-      const [name, dong] = key.split('|');
+      const [type, name, dong] = key.split('|');
       const amounts = trades.map((t) => t.dealAmount).sort((a, b) => a - b);
       const pps = trades.map((t) => Math.round(t.pp)).sort((a, b) => a - b);
       trades.sort((a, b) => (b.dealYear * 10000 + b.dealMonth * 100 + b.dealDay) - (a.dealYear * 10000 + a.dealMonth * 100 + a.dealDay));
@@ -272,7 +277,7 @@ function collectComplexes(outDir) {
 
       const last = trades[0];
       list.push({
-        name, dong,
+        type, name, dong,
         jibun: trades.find((t) => t.jibun)?.jibun || '',
         buildYear: trades.find((t) => t.buildYear)?.buildYear || null,
         count: trades.length,
@@ -325,12 +330,12 @@ function writeComplexIndex(outDir, byRegion, geo, bargains) {
         located++;
       }
       c.bargains = bgCount.get(`${code}|${c.dong}|${c.name}`) || 0;
-      index.push([code, c.dong, c.name, c.count, c.medianPrice, c.buildYear || 0]);
+      index.push([code, c.dong, c.name, c.count, c.medianPrice, c.buildYear || 0, c.type || 'apt']);
     }
     fs.writeFileSync(path.join(dir, `${code}.json`), JSON.stringify({ ...data, generatedAt: new Date().toISOString() }));
   }
   fs.writeFileSync(path.join(outDir, 'complex-index.json'), JSON.stringify({
-    generatedAt: new Date().toISOString(), fields: ['code', 'dong', 'name', 'count', 'medianPrice', 'buildYear'], items: index,
+    generatedAt: new Date().toISOString(), fields: ['code', 'dong', 'name', 'count', 'medianPrice', 'buildYear', 'type'], items: index,
   }));
   return { total, located };
 }

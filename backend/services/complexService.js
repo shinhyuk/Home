@@ -48,7 +48,7 @@ async function loadBargains() {
 
 // ───────────────────────── 검색 ─────────────────────────
 // "염창동 강변힐스테이트", "강변힐스테이트", "강서구 힐스테이트" 모두 처리
-async function searchComplexes(query, regionHint, limit = 30) {
+async function searchComplexes(query, regionHint, limit = 30, types = null) {
   const idx = await loadIndex();
   const tokens = (query || '').trim().split(/\s+/).filter(Boolean);
   if (!tokens.length) return [];
@@ -74,8 +74,9 @@ async function searchComplexes(query, regionHint, limit = 30) {
 
   const out = [];
   for (let i = 0; i < idx.items.length; i++) {
-    const [code, dong, name, count, medianPrice, buildYear] = idx.items[i];
+    const [code, dong, name, count, medianPrice, buildYear, type] = idx.items[i];
     if (codeFilter && code !== codeFilter) continue;
+    if (types && !types.includes(type || 'apt')) continue;
     if (dongFilter && dong !== dongFilter && !dong.endsWith(' ' + dongFilter)) continue;
     const nn = idx.__norm[i];
     let rank;
@@ -84,7 +85,7 @@ async function searchComplexes(query, regionHint, limit = 30) {
     else if (nn.startsWith(q)) rank = 1;
     else if (nn.includes(q)) rank = 2;
     else continue;
-    out.push({ code, region: nameByCode[code], dong, name, count, medianPrice, buildYear: buildYear || null, rank });
+    out.push({ code, region: nameByCode[code], dong, name, type: type || 'apt', count, medianPrice, buildYear: buildYear || null, rank });
   }
   out.sort((a, b) => a.rank - b.rank || b.count - a.count);
   return out.slice(0, limit).map(({ rank, ...r }) => r);
@@ -175,10 +176,10 @@ function scoreComplex(c, price, judge, ctx) {
 
 // 동네 평당 중위가 — bucket을 주면 같은 평형 버킷끼리만 비교 (소형일수록 평당가가 높아 왜곡 방지)
 // 거래량 가중 중위 (나홀로 단지 다수가 기준을 끌어내리지 않도록, 단지당 최대 20건 가중)
-function dongMedianPP(complexes, dong, area) {
+function dongMedianPP(complexes, dong, area, type = 'apt') {
   const pps = [];
   for (const c of complexes) {
-    if (c.dong !== dong) continue;
+    if (c.dong !== dong || (c.type || 'apt') !== type) continue;
     let pp = null, n = 0;
     if (area != null) { const b = nearestBucket(c.buckets, area); if (b) { pp = b.v.pp; n = b.v.count; } }
     else { pp = c.pp; n = c.count; }
@@ -209,8 +210,15 @@ function basisPrice(v) {
 // ───────────────────────── 지도용 단지 목록 ─────────────────────────
 
 // 지역 파일 → 평형(band 또는 전용면적 area±tol) 기준 단지별 판정 목록
-function judgeList(data, { band = 'any', area = null, tol = 4, cap = null, dong = null }) {
-  const list = dong ? data.complexes.filter((c) => c.dong === dong) : data.complexes;
+const TYPE_LABEL = { apt: '아파트', offi: '오피스텔', rh: '연립다세대' };
+function normTypes(t) {
+  if (!t) return ['apt'];
+  const arr = Array.isArray(t) ? t : String(t).split(',');
+  const ok = arr.map((x) => x.trim()).filter((x) => TYPE_LABEL[x]);
+  return ok.length ? ok : ['apt'];
+}
+function judgeList(data, { band = 'any', area = null, tol = 4, cap = null, dong = null, types = ['apt'] }) {
+  const list = data.complexes.filter((c) => (!dong || c.dong === dong) && types.includes(c.type || 'apt'));
   const ppByDong = {};
   const items = [];
   for (const c of list) {
@@ -226,12 +234,12 @@ function judgeList(data, { band = 'any', area = null, tol = 4, cap = null, dong 
     const bp = bk ? basisPrice(bk.v) : { price: c.medianPrice, pp: c.pp, basis: '12m', n: c.count };
     const price = bp.price;
     if (!price) continue;
-    const pk = `${c.dong}|${bk ? Math.round(bk.v.area / 5) : ''}`;
-    if (!(pk in ppByDong)) ppByDong[pk] = dongMedianPP(data.complexes, c.dong, bk ? bk.v.area : null);
+    const pk = `${c.type || 'apt'}|${c.dong}|${bk ? Math.round(bk.v.area / 5) : ''}`;
+    if (!(pk in ppByDong)) ppByDong[pk] = dongMedianPP(data.complexes, c.dong, bk ? bk.v.area : null, c.type || 'apt');
     const judge = judgePrice(price, cap);
     const sc = scoreComplex({ ...c, pp: bp.pp, count: bk ? bk.v.count : c.count }, price, judge, { dongPP: ppByDong[pk] });
     items.push({
-      name: c.name, dong: c.dong, jibun: c.jibun, buildYear: c.buildYear,
+      name: c.name, dong: c.dong, jibun: c.jibun, buildYear: c.buildYear, type: c.type || 'apt', typeLabel: TYPE_LABEL[c.type || 'apt'],
       lat: c.lat ?? null, lon: c.lon ?? null, geo: c.geo || null,
       count: c.count, bargains: c.bargains || 0, trend: c.trend,
       area: bk ? bk.v.area : null, areaCount: bk ? bk.v.count : null, basis: bp.basis, basisN: bp.n,
@@ -256,10 +264,11 @@ async function mapComplexes(opts) {
   const cap = profileCapital(opts.profile);
   const area = Number(opts.area) > 0 ? Number(opts.area) : null;
   const band = area ? 'any' : (opts.band || 'any');
-  const items = judgeList(data, { band, area, tol: Number(opts.tol) || 4, cap, dong: opts.dong || null });
+  const types = normTypes(opts.types);
+  const items = judgeList(data, { band, area, tol: Number(opts.tol) || 4, cap, dong: opts.dong || null, types });
   const limit = opts.limit || 400;
   return {
-    region: data.region, code: r.code, band, area, generatedAt: data.generatedAt,
+    region: data.region, code: r.code, band, area, types, generatedAt: data.generatedAt,
     total: items.length,
     located: items.filter((i) => i.lat != null).length,
     capital: cap ? { own: cap.own, income: cap.income } : null,
@@ -275,7 +284,8 @@ const SCOPE_TEST = {
 };
 const medianOf = (arr) => { if (!arr.length) return null; const s = arr.slice().sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2); };
 
-async function exploreRegions({ scope = 'seoul', area = 59, tol = 4, band = null, profile }) {
+async function exploreRegions({ scope = 'seoul', area = 59, tol = 4, band = null, profile, types: typesIn }) {
+  const types = normTypes(typesIn);
   const test = SCOPE_TEST[scope] || SCOPE_TEST.seoul;
   const codes = Object.keys(nameByCode).filter(test);
   const cap = profileCapital(profile);
@@ -295,7 +305,7 @@ async function exploreRegions({ scope = 'seoul', area = 59, tol = 4, band = null
   let missing = 0;
   for (const { code, data } of results) {
     if (!data) { missing++; continue; }
-    const items = judgeList(data, { band: band || 'any', area: a, tol, cap });
+    const items = judgeList(data, { band: band || 'any', area: a, tol, cap, types });
     if (!items.length) continue;
     const possible = items.filter((i) => i.status === 'possible');
     const tight = items.filter((i) => i.status === 'tight');
@@ -321,7 +331,7 @@ async function exploreRegions({ scope = 'seoul', area = 59, tol = 4, band = null
   regions.sort((a, b) => b.possible - a.possible || b.total - a.total);
   const sum = (k) => regions.reduce((s, r) => s + r[k], 0);
   return {
-    scope, area: a, band: band || null, tol,
+    scope, area: a, band: band || null, tol, types,
     capital: cap ? { own: cap.own, income: cap.income } : null,
     totals: { regions: regions.length, complexes: sum('total'), possible: sum('possible'), tight: sum('tight'), hard: sum('hard'), missing },
     regions,
@@ -329,12 +339,15 @@ async function exploreRegions({ scope = 'seoul', area = 59, tol = 4, band = null
 }
 
 // ───────────────────────── 단지 상세 ─────────────────────────
-async function complexDetail({ region, dong, name, profile }) {
+const TRADE_SRC = { apt: 'apt-trade', offi: 'offi-trade', rh: 'rh-trade' };
+const RENT_SRC = { apt: 'apt-rent', offi: 'offi-rent', rh: 'rh-rent' };
+async function complexDetail({ region, dong, name, profile, type: typeIn }) {
   const r = resolveLawdCode(region || '');
   if (!r) return { error: `지역을 찾을 수 없습니다: ${region}` };
+  const type = TYPE_LABEL[typeIn] ? typeIn : 'apt';
   let data = null;
   try { data = await loadRegion(r.code); } catch (e) { /* 인덱스 없이도 원본으로 진행 */ }
-  const entry = data?.complexes.find((c) => c.name === name && c.dong === dong) || null;
+  const entry = data?.complexes.find((c) => c.name === name && c.dong === dong && (c.type || 'apt') === type) || null;
 
   // 원본 실거래 (아파트 최근 1년) + 전세 (2개월)
   const months12 = realEstate.recentMonths(12);
@@ -343,7 +356,7 @@ async function complexDetail({ region, dong, name, profile }) {
     const ym = months12[k];
     let items = [];
     // 최근 6개월은 캐시→정적→직접 순, 그 이전은 정적 데이터만 (해외 IP 차단 폴백 지연 방지)
-    try { items = k < 6 ? await realEstate.fetchMonthCached('apt-trade', r.code, ym) : await realEstate.fetchMonthStatic('apt-trade', r.code, ym); } catch (e) { items = []; }
+    try { items = k < 6 ? await realEstate.fetchMonthCached(TRADE_SRC[type], r.code, ym) : await realEstate.fetchMonthStatic(TRADE_SRC[type], r.code, ym); } catch (e) { items = []; }
     for (const i of items) {
       if (i.name === name && i.dong === dong && !i.cancelled && i.dealAmount > 0 && i.area > 0) {
         trades.push({
@@ -359,7 +372,7 @@ async function complexDetail({ region, dong, name, profile }) {
   const rents = [];
   for (const ym of months12.slice(0, 2)) {
     let items = [];
-    try { items = await realEstate.fetchMonthCached('apt-rent', r.code, ym); } catch (e) { items = []; }
+    try { items = await realEstate.fetchMonthStatic(RENT_SRC[type], r.code, ym); } catch (e) { items = []; }
     for (const i of items) {
       if (i.name === name && i.dong === dong && i.area > 0) {
         rents.push({
@@ -388,7 +401,7 @@ async function complexDetail({ region, dong, name, profile }) {
     const pps = list.map((t) => t.pp);
     const areaTyp = cl.area;
     const jeonse = rents.filter((x) => x.type === '전세' && Math.abs(x.area - areaTyp) <= 4);
-    const dongPP = data ? dongMedianPP(data.complexes, dong, areaTyp) : null;
+    const dongPP = data ? dongMedianPP(data.complexes, dong, areaTyp, type) : null;
     const jeonseMed = med(jeonse.map((x) => x.deposit));
     const median12 = med(prices);
     const median6 = med(recent.map((t) => t.price));
@@ -407,7 +420,7 @@ async function complexDetail({ region, dong, name, profile }) {
 
     // 이웃 단지 (같은 세부 평형끼리)
     const neighbors = (data?.complexes || [])
-      .filter((c) => c.dong === dong && c.name !== name)
+      .filter((c) => c.dong === dong && c.name !== name && (c.type || 'apt') === type)
       .map((c) => {
         const nb = nearestBucket(c.buckets, areaTyp);
         const b = nb ? nb.v : null;
@@ -439,10 +452,10 @@ async function complexDetail({ region, dong, name, profile }) {
 
   // 급매 이력
   const bg = await loadBargains();
-  const bargains = bg.items.filter((b) => b.name === name && b.dong === dong && b.region === r.name);
+  const bargains = type === 'apt' ? bg.items.filter((b) => b.name === name && b.dong === dong && b.region === r.name) : [];
 
   return {
-    region: r.name, code: r.code, dong, name,
+    region: r.name, code: r.code, dong, name, type, typeLabel: TYPE_LABEL[type],
     jibun: entry?.jibun || '', buildYear: entry?.buildYear || null,
     lat: entry?.lat ?? null, lon: entry?.lon ?? null, geo: entry?.geo || null,
     tradeCount: trades.length, tradeCount6: trades.filter((t) => half.has(t.ym)).length,

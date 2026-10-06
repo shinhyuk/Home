@@ -417,12 +417,13 @@ function profileForApi() {
   if (!p || !p.salaryAmount) return null;
   return { salaryAmount: p.salaryAmount, savingsAmount: p.savingsAmount, jeonseDeposit: p.jeonseDeposit, currentHome: p.currentHome, family: p.family, childrenCount: p.childrenCount };
 }
-async function cxFetchMap({ region, band, dong, area }) {
-  const key = `${region}|${band}|${area || ''}|${dong || ''}|${JSON.stringify(profileForApi())}`;
+async function cxFetchMap({ region, band, dong, area, types }) {
+  types = types && types.length ? types : ['apt'];
+  const key = `${region}|${band}|${area || ''}|${dong || ''}|${types.join(',')}|${JSON.stringify(profileForApi())}`;
   if (CX_MAP_CACHE[key]) return CX_MAP_CACHE[key];
   const data = await apiFetch('/api/real-estate/complex/map', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ region, band, dong, area, profile: profileForApi(), limit: 600 }),
+    body: JSON.stringify({ region, band, dong, area, types, profile: profileForApi(), limit: 600 }),
   });
   CX_MAP_CACHE[key] = data;
   return data;
@@ -433,6 +434,9 @@ function cxInit() {
   const inp = document.getElementById('cxMapRegion');
   if (!inp.value) inp.value = p.region || '서울 강서구';
   if (p.areaBand && BAND_LABEL[p.areaBand]) document.getElementById('cxMapBand').value = p.areaBand;
+  document.querySelectorAll('#cxTypes input').forEach((i) => {
+    i.checked = i.value === 'apt' || (p.housingTypes === 'apt-offi' && i.value === 'offi') || p.housingTypes === 'all';
+  });
   if (!CX_CUR) cxMapLoad();
 }
 
@@ -443,23 +447,24 @@ async function cxSearch() {
   if (!q) return;
   box.innerHTML = '<p class="muted">검색 중…</p>';
   try {
-    const rows = await apiFetch('/api/real-estate/complex/search?q=' + encodeURIComponent(q));
+    const rows = await apiFetch('/api/real-estate/complex/search?q=' + encodeURIComponent(q) + '&types=' + typesOf('cxSearchTypes').join(','));
     if (!rows.length) { box.innerHTML = '<p class="muted">최근 1년 실거래에 없는 단지입니다. 동 이름을 붙이거나 다른 표기(예: "동아3" / "동아3차")로 시도해보세요.</p>'; return; }
     box.innerHTML = rows.map((r) => `
-      <div class="cx-result" onclick="cxOpen('${encodeURIComponent(r.region)}','${encodeURIComponent(r.dong)}','${encodeURIComponent(r.name)}')">
-        <div><span class="nm">${esc(r.name)}</span> <span class="mt">${esc(r.region)} ${esc(r.dong)}${r.buildYear ? ' · ' + r.buildYear + '년' : ''}</span></div>
+      <div class="cx-result" onclick="cxOpen('${encodeURIComponent(r.region)}','${encodeURIComponent(r.dong)}','${encodeURIComponent(r.name)}','${r.type || 'apt'}')">
+        <div><span class="nm">${esc(r.name)}</span>${typeBadge(r.type)} <span class="mt">${esc(r.region)} ${esc(r.dong)}${r.buildYear ? ' · ' + r.buildYear + '년' : ''}</span></div>
         <div class="mt" style="text-align:right;white-space:nowrap"><b style="color:var(--ink)">${fmtMoney(r.medianPrice)}</b><br>1년 ${r.count}건</div>
       </div>`).join('');
-    if (rows.length === 1) cxOpen(encodeURIComponent(rows[0].region), encodeURIComponent(rows[0].dong), encodeURIComponent(rows[0].name));
+    if (rows.length === 1) cxOpen(encodeURIComponent(rows[0].region), encodeURIComponent(rows[0].dong), encodeURIComponent(rows[0].name), rows[0].type);
   } catch (e) {
     box.innerHTML = `<p class="muted">검색 실패: ${esc(e.message)} — 단지 인덱스는 매일 새벽 수집 때 생성됩니다.</p>`;
   }
 }
 
 /* ── 상세 ── */
-async function cxOpen(regionEnc, dongEnc, nameEnc) {
+async function cxOpen(regionEnc, dongEnc, nameEnc, type) {
   const region = decodeURIComponent(regionEnc), dong = decodeURIComponent(dongEnc), name = decodeURIComponent(nameEnc);
-  CX_CUR = { region, dong, name };
+  type = TYPE_LABEL[type] ? type : 'apt';
+  CX_CUR = { region, dong, name, type };
   switchTab('complex');
   const det = document.getElementById('cxDetail');
   det.hidden = false;
@@ -468,9 +473,10 @@ async function cxOpen(regionEnc, dongEnc, nameEnc) {
   try {
     const d = await apiFetch('/api/real-estate/complex/detail', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ region, dong, name, profile: profileForApi() }),
+      body: JSON.stringify({ region, dong, name, type, profile: profileForApi() }),
     });
     document.getElementById('cxMapRegion').value = d.region;
+    document.querySelectorAll('#cxTypes input').forEach((i) => { if (i.value === type) i.checked = true; });
     cxRenderDetail(d); // 평형 선택 시 지도 평형도 맞춰 로드
     cxMapLoad({ focus: d });
   } catch (e) {
@@ -518,7 +524,7 @@ function cxRenderDetail(d) {
     <div class="card">
       <div class="cx-head">
         <div>
-          <h2>🏢 ${esc(d.name)} <span class="badge">아파트</span></h2>
+          <h2>🏢 ${esc(d.name)} <span class="badge ${d.type && d.type !== 'apt' ? 'type-' + d.type : ''}">${esc(d.typeLabel || '아파트')}</span></h2>
           <p style="margin:4px 0 0;color:var(--sub);font-size:13.5px">${esc(d.region)} ${esc(d.dong)} ${esc(d.jibun)} · ${d.buildYear ? d.buildYear + '년 준공 (' + (new Date().getFullYear() - d.buildYear) + '년차)' : '준공년도 미상'} · 최근 1년 ${d.tradeCount}건 (6개월 ${d.tradeCount6}건) · ${links}</p>
         </div>
         <div class="notice" style="margin:0;max-width:420px">${capLine}</div>
@@ -594,7 +600,7 @@ function cxSelectUnit(key) {
         <tr><th>단지</th><th>전용</th><th>중위가</th><th>평당</th><th>동네 대비</th><th>1년</th></tr>
         <tr style="background:var(--brand-soft)"><td><b>${esc(d.name)}</b> <span class="minor">${d.buildYear ? d.buildYear + '년' : ''} · 이 단지</span></td><td>${u.area}㎡</td><td><b>${fmtMoney(u.median)}</b></td><td>${fmtMoney(u.pp)}</td><td class="${(u.relPP ?? 0) > 0 ? 'warn-text' : ''}">${u.relPP != null ? (u.relPP > 0 ? '+' : '') + u.relPP + '%' : '-'}</td><td>${u.count}건</td></tr>
         ${nb.map((n, i) => `<tr class="${i >= 6 ? 'extra' : ''}" style="${n.sameBand ? '' : 'opacity:.6'}">
-          <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(d.region)}','${encodeURIComponent(d.dong)}','${encodeURIComponent(n.name)}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(n.name)}</b></a><span class="minor">${n.buildYear ? n.buildYear + '년' : ''}${n.sameBand ? '' : ' · 이 평형 거래 없음 (전체)'}</span></td>
+          <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(d.region)}','${encodeURIComponent(d.dong)}','${encodeURIComponent(n.name)}','${d.type || 'apt'}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(n.name)}</b></a><span class="minor">${n.buildYear ? n.buildYear + '년' : ''}${n.sameBand ? '' : ' · 이 평형 거래 없음 (전체)'}</span></td>
           <td>${n.area ? n.area + '㎡' : '-'}</td><td><b>${fmtMoney(n.medianPrice)}</b></td><td>${fmtMoney(n.pp)}</td>
           <td class="${(n.relPP ?? 0) > 0 ? 'warn-text' : (n.relPP ?? 0) < 0 ? 'down' : ''}">${n.relPP != null ? (n.relPP > 0 ? '+' : '') + n.relPP + '%' : '-'}</td>
           <td>${n.bandCount ?? n.count}건${n.trend != null ? `<span class="minor ${n.trend > 1 ? 'up' : n.trend < -1 ? 'down' : ''}">${n.trend > 0 ? '+' : ''}${n.trend}%</span>` : ''}</td>
@@ -664,7 +670,7 @@ function drawComplexMap(elId, data, opts = {}) {
 }
 
 function cxPopup(region, c) {
-  return `<div class="pp-head">${esc(c.name)} <span class="badge ${c.status}" style="margin-left:4px">${ST_LABEL[c.status]}</span></div>
+  return `<div class="pp-head">${esc(c.name)}${typeBadge(c.type)} <span class="badge ${c.status}" style="margin-left:4px">${ST_LABEL[c.status]}</span></div>
     <div class="muted">${esc(c.dong)} ${esc(c.jibun || '')} · ${c.buildYear ? c.buildYear + '년' : ''} · 전용 ${c.area ?? '-'}㎡${c.area ? ' (약 ' + supplyPyeong(c.area) + '평형)' : ''} ${c.areaCount ? c.areaCount + '건' : ''}</div>
     <span class="score-pill ${scoreCls(c.score)}" style="margin:6px 0">${esc(c.label)} · ${c.score}점</span>
     ${kv('실거래 중위', `<b>${fmtMoney(c.price)}</b>`)}
@@ -687,7 +693,7 @@ function cxMapList(listId, data, n, onlyOk) {
       <tr><th>#</th><th>단지</th><th>전용</th><th>중위가</th><th>판정</th><th>점수</th></tr>
       ${rows.map((c, i) => `<tr class="${i >= n ? 'extra' : ''}">
         <td>${i + 1}</td>
-        <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(data.region)}','${encodeURIComponent(c.dong)}','${encodeURIComponent(c.name)}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(c.name)}</b></a>${c.lat == null ? ' <span class="badge" title="좌표 수집 중">지도 X</span>' : ''}<span class="minor">${esc(c.dong)} · ${c.buildYear ? c.buildYear + '년 · ' : ''}1년 ${c.count}건${c.units && c.units.length > 1 ? ' · 평형 ' + c.units.length + '개' : ''}${c.bargains ? ' · 급매 ' + c.bargains : ''}</span></td>
+        <td><a href="#complex" onclick="cxOpen('${encodeURIComponent(data.region)}','${encodeURIComponent(c.dong)}','${encodeURIComponent(c.name)}','${c.type || 'apt'}');return false" style="color:inherit"><b style="border-bottom:1.5px dotted var(--brand)">${esc(c.name)}</b></a>${typeBadge(c.type)}${c.lat == null ? ' <span class="badge" title="좌표 수집 중">지도 X</span>' : ''}<span class="minor">${esc(c.dong)} · ${c.buildYear ? c.buildYear + '년 · ' : ''}1년 ${c.count}건${c.units && c.units.length > 1 ? ' · 평형 ' + c.units.length + '개' : ''}${c.bargains ? ' · 급매 ' + c.bargains : ''}</span></td>
         <td>${c.area ?? '-'}㎡${c.area ? `<span class="minor">${supplyPyeong(c.area)}평형</span>` : ''}</td>
         <td><b>${fmtMoney(c.price)}</b>${c.shortfall > 0 ? `<span class="minor warn-text">부족 ${fmtMoney(c.shortfall)}</span>` : c.monthly ? `<span class="minor">월 ${fmtMoney(c.monthly)}</span>` : ''}</td>
         <td><span class="badge ${c.status}" style="margin:0">${ST_LABEL[c.status]}</span></td>
@@ -705,7 +711,7 @@ async function cxMapLoad(opts = {}) {
   sub.textContent = '불러오는 중…';
   try {
     const focus = opts.focus || (CX_CUR && CX_CUR.region === region ? CX_CUR : null);
-    const data = await cxFetchMap({ region, band });
+    const data = await cxFetchMap({ region, band, types: typesOf('cxTypes') });
     sub.textContent = `${data.region} · ${BAND_LABEL[band]} · ${data.total}개 단지 · 좌표 ${data.located}개`;
     drawComplexMap('cxMap', data, { onlyOk, focus, legendId: 'cxMapLegend', listId: 'cxMapList', listN: 10 });
   } catch (e) {
@@ -714,11 +720,18 @@ async function cxMapLoad(opts = {}) {
   }
 }
 ['cxMapBand', 'cxMapOnlyOk'].forEach((id) => document.getElementById(id).addEventListener('change', () => cxMapLoad()));
+document.querySelectorAll('#cxTypes input').forEach((i) => i.addEventListener('change', () => cxMapLoad()));
 document.getElementById('cxMapRegion').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); cxMapLoad(); } });
 
 /* ═══════════ 드릴다운 탐색 (범위 → 구 → 동 → 단지) ═══════════ */
 const EX = { level: 0, scope: 'seoul', area: 59, regions: null, region: null, regionData: null, dong: null };
 const SCOPE_NAME = { seoul: '서울 전체', metro: '수도권', all: '전국' };
+const TYPE_LABEL = { apt: '아파트', offi: '오피스텔', rh: '연립·다세대' };
+function typesOf(boxId) {
+  const v = [...document.querySelectorAll(`#${boxId} input:checked`)].map((i) => i.value);
+  return v.length ? v : ['apt'];
+}
+function typeBadge(t) { return t && t !== 'apt' ? `<span class="badge type-${t}" style="margin-left:4px">${TYPE_LABEL[t]}</span>` : ''; }
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 
 function exInit() {
@@ -728,6 +741,11 @@ function exInit() {
   sel.value = prefer;
   sel.addEventListener('change', () => { document.getElementById('exAreaCustom').hidden = sel.value !== 'custom'; });
   document.getElementById('exOnlyOk').addEventListener('change', () => exRender());
+  const ht = p.housingTypes;
+  document.querySelectorAll('#exTypes input').forEach((i) => {
+    i.checked = i.value === 'apt' || (ht === 'apt-offi' && i.value === 'offi') || ht === 'all';
+    i.addEventListener('change', () => { if (EX.regions) exStart(); });
+  });
   if (profileComplete(p)) exStart();
 }
 function exAreaValue() {
@@ -739,6 +757,7 @@ function exAreaValue() {
 async function exStart() {
   EX.scope = document.getElementById('exScope').value;
   EX.area = exAreaValue();
+  EX.types = typesOf('exTypes');
   EX.level = 0; EX.region = null; EX.regionData = null; EX.dong = null;
   document.getElementById('exEmpty').hidden = true;
   document.getElementById('exBody').hidden = false;
@@ -747,7 +766,7 @@ async function exStart() {
   try {
     EX.regions = await apiFetch('/api/real-estate/complex/explore', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: EX.scope, area: EX.area, profile: profileForApi() }),
+      body: JSON.stringify({ scope: EX.scope, area: EX.area, types: EX.types, profile: profileForApi() }),
     });
     exRender();
   } catch (e) {
@@ -759,7 +778,7 @@ async function exGoRegion(code, name) {
   EX.level = 1; EX.region = { code, name }; EX.dong = null;
   document.getElementById('exHero').innerHTML = `<p class="muted">${esc(name)} 단지를 불러오는 중…</p>`;
   try {
-    EX.regionData = await cxFetchMap({ region: name, area: EX.area });
+    EX.regionData = await cxFetchMap({ region: name, area: EX.area, types: EX.types });
     exRender();
   } catch (e) {
     document.getElementById('exHero').innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
@@ -772,18 +791,20 @@ function exUp(level) {
   if (level === 1) EX.dong = null;
   exRender();
 }
-function exOpenComplex(regionEnc, dongEnc, nameEnc) {
+function exOpenComplex(regionEnc, dongEnc, nameEnc, type) {
   CX_PREFER_AREA = EX.area;
-  cxOpen(regionEnc, dongEnc, nameEnc);
+  cxOpen(regionEnc, dongEnc, nameEnc, type);
 }
 
 function exCrumbs() {
-  const parts = [{ label: `${SCOPE_NAME[EX.scope]} · 전용 ${EX.area}㎡`, level: 0 }];
-  if (EX.region) parts.push({ label: EX.region.name.replace(/^서울 /, ''), level: 1 });
+  const parts = [{ label: SCOPE_NAME[EX.scope].replace(' 전체', ''), level: 0 }];
+  if (EX.region) parts.push({ label: EX.region.name.replace(/^(서울|경기|인천) /, ''), level: 1 });
   if (EX.dong) parts.push({ label: EX.dong, level: 2 });
+  const next = EX.level === 0 ? '구 선택' : EX.level === 1 ? '동 선택' : '단지 선택';
   document.getElementById('exCrumbs').innerHTML = parts.map((p, i) =>
     `${i ? '<span class="sep">›</span>' : ''}<button type="button" class="${p.level === EX.level ? 'cur' : ''}" onclick="exUp(${p.level})">${esc(p.label)}</button>`).join('')
-    + (EX.level < 2 ? `<span class="muted" style="margin-left:6px">${EX.level === 0 ? '구를 누르면 동으로' : '동을 누르면 단지로'}</span>` : '<span class="muted" style="margin-left:6px">단지를 누르면 평형별 상세</span>');
+    + `<span class="sep">›</span><span class="next">${next}</span>`
+    + `<span class="muted" style="margin-left:auto">전용 ${EX.area}㎡ · ${(EX.types || ['apt']).map((t) => TYPE_LABEL[t]).join('·')}</span>`;
 }
 
 function exStats(list) {
@@ -913,8 +934,8 @@ function exComplexTable(rows, tid, n) {
   const region = EX.region.name;
   return `<div class="table-wrap"><table id="${tid}">
     <tr><th>단지</th><th>전용</th><th>중위가</th><th>판정</th></tr>
-    ${rows.map((c, i) => `<tr class="ex-row ${i >= n ? 'extra' : ''}" onclick="exOpenComplex('${encodeURIComponent(region)}','${encodeURIComponent(c.dong)}','${encodeURIComponent(c.name)}')">
-      <td><b>${esc(c.name)}</b><span class="minor">${esc(c.dong)} · ${c.buildYear ? c.buildYear + '년 · ' : ''}${c.areaCount}건${c.bargains ? ' · 급매 ' + c.bargains : ''}</span></td>
+    ${rows.map((c, i) => `<tr class="ex-row ${i >= n ? 'extra' : ''}" onclick="exOpenComplex('${encodeURIComponent(region)}','${encodeURIComponent(c.dong)}','${encodeURIComponent(c.name)}','${c.type || 'apt'}')">
+      <td><b>${esc(c.name)}</b>${typeBadge(c.type)}<span class="minor">${esc(c.dong)} · ${c.buildYear ? c.buildYear + '년 · ' : ''}${c.areaCount}건${c.bargains ? ' · 급매 ' + c.bargains : ''}</span></td>
       <td>${c.area}㎡</td>
       <td><b>${fmtMoney(c.price)}</b>${c.shortfall > 0 ? `<span class="minor warn-text">부족 ${fmtMoney(c.shortfall)}</span>` : c.monthly ? `<span class="minor">월 ${fmtMoney(c.monthly)}</span>` : ''}</td>
       <td><span class="badge ${c.status}" style="margin:0">${ST_LABEL[c.status]}</span><span class="minor">${c.score}점 ${esc(c.label)}</span></td>

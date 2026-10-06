@@ -79,6 +79,14 @@ let analysisBusy = false;
 function naverLink(c) {
   return 'https://map.naver.com/p/search/' + encodeURIComponent(`${CX_REGION} ${c.dong} ${c.name}`);
 }
+// 단지별 외부 링크 묶음: 매물(네이버부동산) · 호갱노노 · 지도
+function extLinks(region, dong, name) {
+  const q = encodeURIComponent(`${dong} ${name}`);
+  const full = encodeURIComponent(`${region} ${dong} ${name}`);
+  return `<a href="https://new.land.naver.com/search?sk=${q}" target="_blank" rel="noopener" class="ext">매물</a>`
+    + ` <a href="https://hogangnono.com/search?q=${q}" target="_blank" rel="noopener" class="ext">호갱노노</a>`
+    + ` <a href="https://map.naver.com/p/search/${full}" target="_blank" rel="noopener" class="ext">지도</a>`;
+}
 
 function trackCard(t, extraHtml) {
   const cls = t.feasible || 'unknown';
@@ -173,7 +181,7 @@ async function initMap(cx) {
     const color = c.grp === 'within' ? '#0e9f6e' : '#c27803';
     L.circleMarker([lat, lon], { radius: 9, color: '#fff', fillColor: color, fillOpacity: .95, weight: 2 })
       .addTo(map)
-      .bindPopup(`<b>${c.name}</b> <small>${c.type || '아파트'}</small><br>${c.dong} · 중위 ${fmtMoney(c.medianPrice)}<br><a href="${naverLink(c)}" target="_blank" rel="noopener">네이버지도에서 보기 →</a>`);
+      .bindPopup(`<b>${c.name}</b> <small>${c.type || '아파트'}</small><br>${c.dong} · 중위 ${fmtMoney(c.medianPrice)}<br>${extLinks(cx.regionName, c.dong, c.name)}`);
     pts.push([lat, lon]);
   });
   if (pts.length) map.fitBounds(pts, { padding: [36, 36], maxZoom: 15 });
@@ -300,7 +308,7 @@ function renderAnalysis(r) {
 
     const rowOf = (c, extra, i, vis) => `
       <tr class="${i >= vis ? 'extra' : ''}">
-        <td><a href="${naverLink(c)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><b style="border-bottom:1.5px dotted var(--brand)">${c.name}</b></a> <span class="badge" style="margin-left:4px">${c.type || '아파트'}</span><span class="minor">${c.dong} · ${c.buildYear ? c.buildYear + '년' : ''} · ${areaToPyeong(c.areaRange)} · <a href="${naverLink(c)}" target="_blank" rel="noopener" style="color:var(--brand)">지도 🔗</a></span></td>
+        <td><a href="${naverLink(c)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><b style="border-bottom:1.5px dotted var(--brand)">${c.name}</b></a> <span class="badge" style="margin-left:4px">${c.type || '아파트'}</span><span class="minor">${c.dong} · ${c.buildYear ? c.buildYear + '년' : ''} · ${areaToPyeong(c.areaRange)} · ${extLinks(CX_REGION, c.dong, c.name)}</span></td>
         <td>${c.count}건</td>
         <td><b>${fmtMoney(c.medianPrice)}</b><span class="minor">${fmtMoney(c.minPrice)}~${fmtMoney(c.maxPrice)}</span></td>
         <td>${fmtMoney(c.avgPerPyeong)}</td>
@@ -605,7 +613,7 @@ function bgRender() {
         <b style="border-bottom:1.5px dotted var(--brand)">${b.name}</b></a>
         ${b.direct ? '<span class="badge hard">직거래</span>' : ''}
         ${(b.floor ?? 99) <= 2 ? '<span class="badge tight">저층</span>' : ''}
-        <span class="minor">${b.region} ${b.dong} · 표본 ${b.samples}건</span></td>
+        <span class="minor">${b.region} ${b.dong} · 표본 ${b.samples}건 · ${extLinks(b.region, b.dong, b.name)}</span></td>
       <td>${b.area}㎡ (${pyeongOfM2(b.area)}평)<span class="minor">${b.floor ?? '-'}층</span></td>
       <td><b>${fmtMoney(b.price)}</b><span class="minor">평당 ${fmtMoney(b.pp)} / 중위 ${fmtMoney(b.medianPP)}</span></td>
       <td><b style="color:var(--bad);font-size:15px">${b.discount}%</b></td>
@@ -689,7 +697,7 @@ function huntRender() {
           ((c.best.floor ?? 99) <= 2 ? '<span class="badge tight">저층</span>' : '');
         return `<tr class="${i >= 6 ? 'extra' : ''}">
           <td><a href="${bgNaver(c.best)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><b style="border-bottom:1.5px dotted var(--brand)">${c.name}</b></a>
-            <span class="minor">${c.region} ${c.dong} · ${c.best.area}㎡ · ${c.best.date.slice(5)} 체결</span></td>
+            <span class="minor">${c.region} ${c.dong} · ${c.best.area}㎡ · ${c.best.date.slice(5)} 체결 · ${extLinks(c.region, c.dong, c.name)}</span></td>
           <td>${np ? fmtMoney(np) : '-'} → <b>${fmtMoney(c.best.price)}</b></td>
           <td><b style="color:var(--bad)">${c.best.discount}%</b></td>
           <td>${badges}</td>
@@ -746,7 +754,7 @@ async function renderHome() {
     document.getElementById('homeBgTable').innerHTML =
       '<tr><th>단지</th><th>체결가</th><th>할인</th></tr>' +
       rows.map((b) => `<tr>
-        <td><a href="${bgNaver(b)}" target="_blank" rel="noopener" style="color:inherit"><b>${b.name}</b></a><span class="minor">${b.region} · ${b.area}㎡ ${b.floor ?? '-'}층 · ${b.date.slice(5)}</span></td>
+        <td><b>${b.name}</b><span class="minor">${b.region} · ${b.area}㎡ ${b.floor ?? '-'}층 · ${b.date.slice(5)} · ${extLinks(b.region, b.dong, b.name)}</span></td>
         <td>${fmtMoney(b.price)}</td>
         <td><b style="color:var(--bad)">${b.discount}%</b></td>
       </tr>`).join('');

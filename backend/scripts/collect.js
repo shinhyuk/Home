@@ -63,6 +63,11 @@ async function main() {
   fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary));
   console.log(`지역 요약 생성: ${summary.regions.length}개 지역`);
 
+  // 급매 체결 탐지 (단지 평당 중위가 대비 -7% 이상 저가 체결)
+  const bargains = buildBargains(outDir);
+  fs.writeFileSync(path.join(outDir, 'bargains.json'), JSON.stringify(bargains));
+  console.log(`급매 탐지: ${bargains.items.length}건`);
+
   fs.writeFileSync(path.join(outDir, 'meta.json'), JSON.stringify({
     collectedAt: new Date().toISOString(),
     files: ok,
@@ -141,6 +146,66 @@ function buildSummary(outDir) {
   }
 
   return { generatedAt: new Date().toISOString(), regions };
+}
+
+// 급매 체결 탐지: 최근 2개월 거래 중, 같은 단지 6개월 평당 중위가 대비 -7% 이상 저가
+function buildBargains(outDir) {
+  const nameByCode = {};
+  for (const [name, code] of Object.entries(LAWD_CODES)) {
+    if (!nameByCode[code]) nameByCode[code] = name;
+  }
+  const months6 = recentMonths(6);
+  const recent2 = new Set(months6.slice(0, 2));
+  const items = [];
+
+  for (const [code, regionName] of Object.entries(nameByCode)) {
+    // 단지별 평당가 수집
+    const groups = new Map();
+    for (const ym of months6) {
+      for (const i of readJson(path.join(outDir, 'apt-trade', code, `${ym}.json`))) {
+        if (i.cancelled || !(i.dealAmount > 0) || !(i.area > 0) || !i.name) continue;
+        // 평당가는 면적이 클수록 낮아지므로, 같은 단지라도 10㎡ 버킷 내에서만 비교
+        const key = `${i.name}|${i.dong}|${Math.round(i.area / 10)}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({ ...i, ym, pp: i.dealAmount / (i.area / PYEONG) });
+      }
+    }
+
+    const regionBargains = [];
+    for (const [key, list] of groups) {
+      if (list.length < 5) continue; // 표본 부족 단지 제외
+      const pps = list.map((t) => t.pp).sort((a, b) => a - b);
+      const medPP = median(pps.map(Math.round));
+      if (!medPP) continue;
+
+      for (const t of list) {
+        if (!recent2.has(t.ym)) continue;
+        const discount = Math.round(((t.pp / medPP) - 1) * 1000) / 10;
+        if (discount > -7) continue;
+        regionBargains.push({
+          region: regionName,
+          name: t.name,
+          dong: t.dong,
+          jibun: t.jibun || '',
+          area: Math.round(t.area * 10) / 10,
+          floor: t.floor ?? null,
+          price: t.dealAmount,
+          date: `${t.dealYear}-${String(t.dealMonth).padStart(2, '0')}-${String(t.dealDay).padStart(2, '0')}`,
+          discount,
+          medianPP: medPP,
+          pp: Math.round(t.pp),
+          samples: list.length,
+          direct: (t.dealingType || '').includes('직거래'),
+        });
+      }
+    }
+
+    regionBargains.sort((a, b) => a.discount - b.discount);
+    items.push(...regionBargains.slice(0, 25)); // 지역당 상한
+  }
+
+  items.sort((a, b) => a.discount - b.discount);
+  return { generatedAt: new Date().toISOString(), basis: '단지 6개월 평당 중위가 대비, 최근 2개월 체결', items: items.slice(0, 800) };
 }
 
 main();

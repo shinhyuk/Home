@@ -60,6 +60,7 @@ async function nominatimDong(region, dong) {
 }
 
 // ── 2. Overpass: 동 범위 안의 이름 있는 아파트 ──
+let overpassRR = 0;
 const OVERPASS_MIRRORS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
@@ -67,22 +68,26 @@ const OVERPASS_MIRRORS = [
 ];
 async function overpassApartments(bbox) {
   const [s, w, n, e] = bbox;
-  const q = `[out:json][timeout:20];(
-    nwr["name"]["building"~"apartments|residential"](${s},${w},${n},${e});
-    nwr["name"]["landuse"="residential"](${s},${w},${n},${e});
-    nwr["name"]["residential"="apartments"](${s},${w},${n},${e});
-  );out center 300;`;
+  // 가벼운 질의: 이름 있는 아파트 건물(way)과 주거 단지(landuse)만, 짧은 타임아웃
+  const q = `[out:json][timeout:15];(
+    way["name"]["building"="apartments"](${s},${w},${n},${e});
+    way["name"]["landuse"="residential"](${s},${w},${n},${e});
+    relation["name"]["landuse"="residential"](${s},${w},${n},${e});
+  );out center 200;`;
   let res = null, lastErr = null;
-  for (const url of OVERPASS_MIRRORS) {
+  // 미러를 번갈아 사용, 동마다 최대 2회 시도 (실패 시 다음 수집 때 재시도)
+  const start = overpassRR++ % OVERPASS_MIRRORS.length;
+  for (let k = 0; k < 2; k++) {
+    const url = OVERPASS_MIRRORS[(start + k) % OVERPASS_MIRRORS.length];
     try {
       res = await axios.post(url, `data=${encodeURIComponent(q)}`, {
         headers: { 'User-Agent': UA, 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 35000,
+        timeout: 20000,
       });
       break;
     } catch (err) {
       lastErr = err;
-      await sleep(800);
+      await sleep(500);
     }
   }
   if (!res) throw lastErr || new Error('overpass unavailable');
@@ -114,7 +119,7 @@ async function geocodeComplexes(complexes, prev, opts = {}) {
     budgetMs = 25 * 60 * 1000,
     maxVworld = 4000,
     maxOverpassDongs = 250,
-    maxNominatim = 500,
+    maxNominatim = 700,
     log = console.log,
   } = opts;
 
@@ -161,7 +166,7 @@ async function geocodeComplexes(complexes, prev, opts = {}) {
     log(`VWorld ${nVw}건 호출`);
   }
 
-  // 2) 동 단위: Nominatim 중심/경계 → Overpass 이름 매칭 → 남은 단지는 동 중심
+  // 2) 동 중심 (Nominatim) — 싸고 빠르므로 먼저 모든 동에 근사 좌표부터 부여
   const remaining = todo.filter((c) => {
     const g = geo.complexes[complexKey(c.code, c.dong, c.name)];
     return !g || g.src === 'dong' || !g.src;
@@ -174,12 +179,10 @@ async function geocodeComplexes(complexes, prev, opts = {}) {
   }
   const dongList = [...byDong.values()].sort((a, b) => pri(a.code) - pri(b.code) || b.list.length - a.list.length);
 
-  let osmDongs = 0;
   for (const d of dongList) {
     if (!timeLeft()) break;
     const dk = `${d.code}|${d.dong}`;
     let dg = geo.dongs[dk];
-
     if (!dg) {
       if (nNomi >= maxNominatim) continue;
       try {
@@ -193,38 +196,41 @@ async function geocodeComplexes(complexes, prev, opts = {}) {
         continue;
       }
     }
-    if (dg.miss || !dg.bbox) continue;
-
-    // Overpass는 동마다 한 번 (30일 지나면 새 단지 매칭 위해 재조회)
-    let cands = null;
-    const stale = dg.osm && dg.at && (Date.now() - Date.parse(dg.at)) > 30 * 86400000
-      && d.list.some((c) => !geo.complexes[complexKey(c.code, c.dong, c.name)]);
-    if ((!dg.osm || stale) && osmDongs < maxOverpassDongs) {
-      try {
-        await sleep(1500);
-        cands = await overpassApartments(dg.bbox);
-        osmDongs++;
-        dg.osm = 1;
-        dg.osmN = cands.length;
-        dg.at = now;
-      } catch (e) {
-        log(`Overpass 실패 ${dk}: ${e.message}`);
-        cands = null;
-      }
+    if (dg.miss) continue;
+    for (const c of d.list) {
+      const key = complexKey(c.code, c.dong, c.name);
+      if (!geo.complexes[key]) { geo.complexes[key] = { lat: dg.lat, lon: dg.lon, src: 'dong', at: now }; nDong++; }
     }
+  }
 
+  // 3) Overpass 정밀화 — 남은 시간 동안, 아직 OSM 조회 안 한 동부터 (서울 우선)
+  let osmDongs = 0;
+  const needOsm = dongList.filter((d) => {
+    const dg = geo.dongs[`${d.code}|${d.dong}`];
+    if (!dg || dg.miss || !dg.bbox) return false;
+    const stale = dg.osm && dg.at && (Date.now() - Date.parse(dg.at)) > 30 * 86400000;
+    return !dg.osm || stale;
+  });
+  for (const d of needOsm) {
+    if (!timeLeft() || osmDongs >= maxOverpassDongs) break;
+    const dk = `${d.code}|${d.dong}`;
+    const dg = geo.dongs[dk];
+    let cands;
+    try {
+      await sleep(1200);
+      cands = await overpassApartments(dg.bbox);
+    } catch (e) {
+      log(`Overpass 실패 ${dk}: ${e.message}`);
+      continue;
+    }
+    osmDongs++;
+    dg.osm = 1; dg.osmN = cands.length; dg.at = now;
     for (const c of d.list) {
       const key = complexKey(c.code, c.dong, c.name);
       const cur = geo.complexes[key];
       if (cur && cur.src === 'vworld') continue;
-      const m = cands ? matchOsm(c.name, cands) : null;
-      if (m) {
-        geo.complexes[key] = { lat: m.lat, lon: m.lon, src: 'osm', at: now, vw: cur?.vw };
-        nOsm++;
-      } else if (!cur) {
-        geo.complexes[key] = { lat: dg.lat, lon: dg.lon, src: 'dong', at: now };
-        nDong++;
-      }
+      const m = matchOsm(c.name, cands);
+      if (m) { geo.complexes[key] = { lat: m.lat, lon: m.lon, src: 'osm', at: now, vw: cur?.vw }; nOsm++; if (cur?.src === 'dong') nDong--; }
     }
   }
 

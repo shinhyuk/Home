@@ -2,6 +2,7 @@
 // (Render 등 해외 클라우드 IP는 국토부 API가 403 차단 → Actions 러너가 대신 수집)
 // 사용: node backend/scripts/collect.js <출력디렉토리>
 // 필요 환경변수: MOLIT_API_KEY (GitHub Secrets에 등록)
+// 지역 코드: 2026.7 행정개편 반영 (전남광주통합특별시 12, 인천 재편)
 const fs = require('fs');
 const path = require('path');
 const molitApi = require('../services/molitApi');

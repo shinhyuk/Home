@@ -204,3 +204,7 @@ details.scenario.top .sc-rank { background: var(--brand); color: #fff; }
 .sc-pc > div { flex: 1; min-width: 240px; }
 .sc-pc ul { margin: 6px 0 0; padding-left: 18px; }
 .kv-wrap { margin: 4px 0; }
+
+button.mini-btn { width:auto; margin:0; padding:4px 10px; font-size:12px; border-radius:7px; background:var(--brand-soft); color:var(--brand); border:none; font-weight:700; }
+button.mini-btn:hover { background:var(--brand); color:#fff; }
+td .minor { display:block; }

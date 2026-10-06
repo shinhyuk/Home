@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="전국 실거래 데이터로 투자 대상 지역을 스캔 — 갭·상승률·전세가율·거래량 정렬">
+<title>오름홈 — 투자 레이더</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <div class="page-head">
+    <div class="site-head">
+      <div class="logo"><a href="index.html">오름<span>홈</span></a></div>
+      <div class="tagline"><a href="index.html" style="color:var(--brand);font-weight:700;text-decoration:none">📝 맞춤 분석</a> · 전국에서 투자 대상 지역 찾기</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>스캔 조건</h2>
+    <div class="row">
+      <div>
+        <label>가용 투자금 (만원) <span class="hint">갭투자면 갭+취득세와 비교</span></label>
+        <input type="number" id="budget" min="0" step="1000" placeholder="예: 30000">
+      </div>
+      <div>
+        <label>투자 방식</label>
+        <select id="mode">
+          <option value="gap" selected>갭투자 (전세 끼고 매수)</option>
+          <option value="own">실거주형 (대출 포함 매수)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>지역 범위</label>
+        <select id="scope">
+          <option value="metro" selected>수도권</option>
+          <option value="seoul">서울만</option>
+          <option value="bigcity">광역시+세종</option>
+          <option value="all">전국</option>
+        </select>
+      </div>
+      <div>
+        <label>정렬</label>
+        <select id="sort">
+          <option value="score" selected>매력도 (종합)</option>
+          <option value="changeRate">6개월 상승률</option>
+          <option value="gapAsc">갭 작은 순</option>
+          <option value="jeonseRatio">전세가율 높은 순</option>
+          <option value="tradeCount">거래량 많은 순</option>
+          <option value="priceAsc">중위가 낮은 순</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>연소득 (만원) <span class="hint">실거주형 대출한도 계산용</span></label>
+        <input type="number" id="income" min="0" step="100" placeholder="예: 6000">
+      </div>
+      <div>
+        <label>최소 거래량 <span class="hint">유동성 필터 (2개월)</span></label>
+        <select id="minTrade">
+          <option value="10">10건+</option>
+          <option value="30" selected>30건+</option>
+          <option value="100">100건+</option>
+        </select>
+      </div>
+    </div>
+    <button type="button" id="scanBtn">전국 스캔 →</button>
+  </div>
+
+  <div class="card" id="resultCard" hidden>
+    <h2 id="resultTitle">스캔 결과</h2>
+    <p class="muted" id="resultMeta" style="margin:-6px 0 10px"></p>
+    <div class="table-wrap"><table id="radarTable"></table></div>
+    <p class="muted" style="margin-top:10px">
+      매력도 = 상승률·전세가율(갭 효율)·거래량(유동성) 종합 ·
+      <b style="color:var(--good)">초록</b>=자금 내 가능 ·
+      갭 = 중위가 × (1−전세가율) · 필요자금 = 갭+취득세(1주택 1~3% 약식)
+    </p>
+  </div>
+
+  <div class="footer">
+    데이터: 국토교통부 실거래가 공개시스템 (매일 자동 수집) · 본 도구는 참고용이며 투자 권유가 아닙니다
+  </div>
+</div>
+
+<script src="api.js"></script>
+<script>
+const SCOPES = {
+  seoul: (n) => n.startsWith('서울'),
+  metro: (n) => /^(서울|경기|인천)/.test(n),
+  bigcity: (n) => /^(부산|대구|대전|광주|울산|세종)/.test(n),
+  all: () => true,
+};
+
+function acqTax(p) {
+  if (!p) return 0;
+  if (p <= 60000) return Math.round(p * 0.011);
+  if (p <= 90000) return Math.round(p * (0.011 + ((p - 60000) / 30000) * 0.022));
+  return Math.round(p * 0.033);
+}
+
+// 실거주형 약식 대출한도 (스트레스 DSR 5.5% · 30년 · 가격구간 상한 · LTV 70%)
+function maxLoan(income, price) {
+  if (!income) return 0;
+  const r = 0.055 / 12, n = 360;
+  const factor = (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+  const dsr = ((income / 12) * 0.4) / factor;
+  const cap = price <= 150000 ? 60000 : price <= 250000 ? 40000 : 20000;
+  return Math.round(Math.min(dsr, price * 0.7, cap));
+}
+
+let SUMMARY = null;
+
+async function loadSummary() {
+  if (SUMMARY) return SUMMARY;
+  const res = await fetch('https://raw.githubusercontent.com/shinhyuk/Home/data/summary.json', { cache: 'no-cache' });
+  if (!res.ok) throw new Error('데이터 로드 실패');
+  SUMMARY = await res.json();
+  return SUMMARY;
+}
+
+async function scan() {
+  const btn = document.getElementById('scanBtn');
+  btn.textContent = '스캔 중…'; btn.disabled = true;
+  try {
+    const data = await loadSummary();
+    const budget = Number(document.getElementById('budget').value) || 0;
+    const income = Number(document.getElementById('income').value) || 0;
+    const mode = document.getElementById('mode').value;
+    const scope = document.getElementById('scope').value;
+    const sortKey = document.getElementById('sort').value;
+    const minTrade = Number(document.getElementById('minTrade').value);
+
+    let rows = data.regions
+      .filter((r) => r.medianPrice && SCOPES[scope](r.name) && r.tradeCount >= minTrade)
+      .map((r) => {
+        const gap = r.jeonseRatio ? Math.round(r.medianPrice * (1 - r.jeonseRatio / 100)) : null;
+        const gapCost = gap != null ? gap + acqTax(r.medianPrice) : null;
+        const ownNeed = Math.max(0, r.medianPrice - maxLoan(income, r.medianPrice)); // 자기자본 필요액
+        const need = mode === 'gap' ? gapCost : ownNeed;
+        const ok = budget > 0 && need != null ? need <= budget : null;
+        // 매력도: 상승률(≈-10~+15) + 전세가율 보정 + 유동성
+        const score = Math.round(
+          (r.changeRate ?? 0) * 3 +
+          (r.jeonseRatio ?? 40) * 0.4 +
+          Math.min(r.tradeCount, 300) / 15
+        );
+        return { ...r, gap, gapCost, ownNeed, need, ok, score };
+      });
+
+    const sorters = {
+      score: (a, b) => b.score - a.score,
+      changeRate: (a, b) => (b.changeRate ?? -99) - (a.changeRate ?? -99),
+      gapAsc: (a, b) => (a.gapCost ?? 1e15) - (b.gapCost ?? 1e15),
+      jeonseRatio: (a, b) => (b.jeonseRatio ?? -1) - (a.jeonseRatio ?? -1),
+      tradeCount: (a, b) => b.tradeCount - a.tradeCount,
+      priceAsc: (a, b) => a.medianPrice - b.medianPrice,
+    };
+    rows.sort(sorters[sortKey]);
+
+    const okCount = rows.filter((r) => r.ok).length;
+    document.getElementById('resultCard').hidden = false;
+    document.getElementById('resultTitle').textContent =
+      `스캔 결과 — ${rows.length}개 지역` + (budget ? ` (자금 내 가능 ${okCount}곳)` : '');
+    document.getElementById('resultMeta').textContent =
+      `데이터 기준: ${(data.generatedAt || '').slice(0, 10)} · 전국 ${data.regions.length}개 시군구 수집 중`;
+
+    const needHead = mode === 'gap' ? '갭 / 필요자금' : '필요 자기자본';
+    document.getElementById('radarTable').innerHTML =
+      `<tr><th>#</th><th>지역</th><th>중위가</th><th>평당가</th><th>전세가율</th><th>${needHead}</th><th>6개월</th><th>거래</th><th>매력도</th><th></th></tr>` +
+      rows.map((r, i) => {
+        const needCell = mode === 'gap'
+          ? (r.gap != null ? `${fmtMoney(r.gap)}<span class="minor">총 ${fmtMoney(r.gapCost)}</span>` : '-')
+          : fmtMoney(r.ownNeed);
+        const okStyle = r.ok === true ? 'style="color:var(--good);font-weight:700"' : r.ok === false ? 'style="color:var(--faint)"' : '';
+        const tCls = r.changeRate > 1 ? 'up' : r.changeRate < -1 ? 'down' : '';
+        return `<tr ${r.ok === false ? 'style="opacity:.55"' : ''}>
+          <td>${i + 1}</td>
+          <td><b>${r.name}</b></td>
+          <td>${fmtMoney(r.medianPrice)}</td>
+          <td>${fmtMoney(r.avgPerPyeong)}</td>
+          <td>${r.jeonseRatio ?? '-'}%</td>
+          <td ${okStyle}>${needCell}</td>
+          <td class="${tCls}">${r.changeRate > 0 ? '+' : ''}${r.changeRate ?? '-'}%</td>
+          <td>${r.tradeCount}건</td>
+          <td><b>${r.score}</b></td>
+          <td><button type="button" class="mini-btn" onclick="goAnalyze('${r.name}')">분석→</button></td>
+        </tr>`;
+      }).join('');
+  } catch (e) {
+    alert('스캔 실패: ' + e.message);
+  } finally {
+    btn.textContent = '전국 스캔 →'; btn.disabled = false;
+  }
+}
+
+function goAnalyze(name) {
+  try {
+    const saved = JSON.parse(localStorage.getItem('ormhome_input') || '{}');
+    saved.region = name;
+    localStorage.setItem('ormhome_input', JSON.stringify(saved));
+  } catch (e) { /* 무시 */ }
+  location.href = 'index.html';
+}
+
+document.getElementById('scanBtn').addEventListener('click', scan);
+
+// 이전 입력 복원 후 자동 1회 스캔
+try {
+  const saved = JSON.parse(localStorage.getItem('ormhome_input') || 'null');
+  if (saved?.savingsAmount) document.getElementById('budget').value = saved.savingsAmount;
+  if (saved?.salaryAmount) document.getElementById('income').value = saved.salaryAmount;
+} catch (e) { /* 무시 */ }
+scan();
+</script>
+</body>
+</html>

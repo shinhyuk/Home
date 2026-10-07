@@ -40,24 +40,45 @@ async function main() {
   }
 
   const codes = [...new Set(Object.values(LAWD_CODES))];
-  let ok = 0, fail = 0;
+  let ok = 0, fail = 0, reused = 0;
+
+  // 증분 수집: 최근 3개월만 새로 받고, 그 이전 달은 전날 data 브랜치(PREV_DIR) 파일 재사용
+  // (신고는 계약 후 30일 내, 취소 신고도 드물게 늦게 들어오므로 일요일엔 전체 갱신)
+  const prevDir = process.env.PREV_DIR && fs.existsSync(process.env.PREV_DIR) ? process.env.PREV_DIR : null;
+  const fullRefresh = process.env.FULL_REFRESH === '1' || new Date().getUTCDay() === 0;
+  console.log(`수집 모드: ${prevDir && !fullRefresh ? '증분 (이전 데이터 ' + prevDir + ' 재사용)' : '전체'}`);
+
+  const fetchOne = async (type, code, ym, idx) => {
+    const dir = path.join(outDir, type, code);
+    const file = path.join(dir, `${ym}.json`);
+    fs.mkdirSync(dir, { recursive: true });
+    if (prevDir && !fullRefresh && idx >= 3) {
+      const pf = path.join(prevDir, type, code, `${ym}.json`);
+      if (fs.existsSync(pf)) { fs.copyFileSync(pf, file); reused++; return; }
+    }
+    try {
+      const items = await molitApi.fetchMonth(type, code, ym);
+      fs.writeFileSync(file, JSON.stringify(items));
+      ok++;
+    } catch (err) {
+      fail++;
+      console.error(`FAIL ${type}/${code}/${ym}: ${err.message}`);
+      // 실패 시 이전 파일이라도 유지
+      const pf = prevDir ? path.join(prevDir, type, code, `${ym}.json`) : null;
+      if (pf && fs.existsSync(pf)) fs.copyFileSync(pf, file);
+    }
+    await sleep(120); // 공공서버 배려
+  };
 
   for (const { type, months } of PLAN) {
-    for (const ym of recentMonths(months)) {
-      for (const code of codes) {
-        try {
-          const items = await molitApi.fetchMonth(type, code, ym);
-          const dir = path.join(outDir, type, code);
-          fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(path.join(dir, `${ym}.json`), JSON.stringify(items));
-          ok++;
-        } catch (err) {
-          fail++;
-          console.error(`FAIL ${type}/${code}/${ym}: ${err.message}`);
-        }
-        await sleep(150); // 공공서버 배려
+    const yms = recentMonths(months);
+    for (let idx = 0; idx < yms.length; idx++) {
+      const ym = yms[idx];
+      // 동시 2건
+      for (let i = 0; i < codes.length; i += 2) {
+        await Promise.all(codes.slice(i, i + 2).map((code) => fetchOne(type, code, ym, idx)));
       }
-      console.log(`${type} ${ym} 완료 (누적 성공 ${ok} / 실패 ${fail})`);
+      console.log(`${type} ${ym} 완료 (누적 성공 ${ok} / 실패 ${fail} / 재사용 ${reused})`);
     }
   }
 
@@ -77,11 +98,12 @@ async function main() {
   fs.writeFileSync(path.join(outDir, 'meta.json'), JSON.stringify({
     collectedAt: new Date().toISOString(),
     files: ok,
+    reused,
     failures: fail,
     usage: molitApi.getDailyUsage(),
   }, null, 2));
 
-  console.log(`수집 완료: 성공 ${ok}, 실패 ${fail}`);
+  console.log(`수집 완료: 성공 ${ok}, 재사용 ${reused}, 실패 ${fail}`);
   // 성공이 하나도 없으면 실패 처리 (키 오류 등)
   if (ok === 0) process.exit(1);
 }
@@ -349,13 +371,19 @@ async function buildComplexes(outDir, bargains) {
 
   // 이전 geo.json 가져오기 (data 브랜치) → 증분 지오코딩
   let prev = { dongs: {}, complexes: {} };
-  const base = process.env.STATIC_DATA_BASE || 'https://raw.githubusercontent.com/shinhyuk/Home/data';
-  try {
-    const axios = require('axios');
-    const res = await axios.get(`${base}/geo.json`, { timeout: 20000 });
-    if (res.data && res.data.complexes) prev = res.data;
-  } catch (e) {
-    console.log('이전 geo.json 없음 (첫 실행이거나 로드 실패):', e.message);
+  const prevLocal = process.env.PREV_DIR ? path.join(process.env.PREV_DIR, 'geo.json') : null;
+  if (prevLocal && fs.existsSync(prevLocal)) {
+    try { const g = JSON.parse(fs.readFileSync(prevLocal, 'utf8')); if (g && g.complexes) prev = g; } catch (e) { /* 무시 */ }
+  }
+  if (!Object.keys(prev.complexes).length) {
+    const base = process.env.STATIC_DATA_BASE || 'https://raw.githubusercontent.com/shinhyuk/Home/data';
+    try {
+      const axios = require('axios');
+      const res = await axios.get(`${base}/geo.json`, { timeout: 20000 });
+      if (res.data && res.data.complexes) prev = res.data;
+    } catch (e) {
+      console.log('이전 geo.json 없음 (첫 실행이거나 로드 실패):', e.message);
+    }
   }
 
   let geo = prev;

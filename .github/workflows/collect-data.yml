@@ -20,9 +20,15 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
+      - name: Previous data (incremental reuse)
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: data
+          path: prev
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -32,6 +38,7 @@ jobs:
         env:
           MOLIT_API_KEY: ${{ secrets.MOLIT_API_KEY }}
           VWORLD_API_KEY: ${{ secrets.VWORLD_API_KEY }}   # 선택: 있으면 단지 핀이 지번 정확 위치
+          PREV_DIR: prev                                  # 전날 data 브랜치 (증분 수집)
         run: node backend/scripts/collect.js out
       - name: Publish to data branch
         run: |

@@ -1,0 +1,11 @@
+{
+  "collectedAt": "2026-11-13T23:59:45.304Z",
+  "files": 2310,
+  "reused": 4158,
+  "failures": 0,
+  "usage": {
+    "date": "Fri Nov 13 2026",
+    "calls": 2338,
+    "limit": 10000
+  }
+}
